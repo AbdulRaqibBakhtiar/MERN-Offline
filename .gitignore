@@ -5,3 +5,4 @@ server/node_modules/
 .env.local
 client/build/
 client/dist/
+server/public/
