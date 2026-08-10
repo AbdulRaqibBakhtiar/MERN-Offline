@@ -48,7 +48,6 @@ connectDB();
 const runSchemaMigration = async () => {
   try {
     const Inventory = require('./models/Inventory');
-    console.log("⚙️ Checking database products for missing commercial fields...");
     const itemsToUpdate = await Inventory.find({ $or: [ { condition: { $exists: false } }, { condition: "" } ] });
     
     if (itemsToUpdate.length === 0) {

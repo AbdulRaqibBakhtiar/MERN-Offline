@@ -245,7 +245,6 @@ module.exports = {
           ioInstance.to(details.room).emit("room_users_update", remainingList);
           socket.to(details.room).emit("user_disconnected_from_workspace", { socketId: socket.id });
         }
-        console.log(`🔌 Client disconnected safely: ${socket.id}`);
       });
     });
 

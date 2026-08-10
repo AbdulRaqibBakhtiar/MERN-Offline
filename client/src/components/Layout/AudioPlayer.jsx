@@ -16,7 +16,7 @@ export const AudioPlayer = ({ src, msgId, isMe, chatProps, onDurationChange, ava
         ws = WaveSurfer.create({
           container: waveformRef.current,
           url: src,
-          height: 24, 
+          height: 24,
           // 🎯 MODERN SLIDER COLORS: Vibrant high-contrast clean design profiles
           waveColor: isMe ? "rgba(255, 255, 255, 0.28)" : "#cbd5e1",
           progressColor: isMe ? "#ffffff" : "#2563eb",
@@ -25,12 +25,21 @@ export const AudioPlayer = ({ src, msgId, isMe, chatProps, onDurationChange, ava
           barGap: 1.5,
           barRadius: 2,
           normalize: true,
+          
+          // 🎯 THE PERMANENT FIX: Instructs WaveSurfer to pass CORS requests cleanly across ports 3000 & 5000
+          fetchOptions: {
+            mode: 'cors',
+            credentials: 'omit'
+          }
         });
+        
         waveSurferRef.current = ws;
+
         ws.on("ready", () => {
           const d = ws.getDuration();
           onDurationChange?.(d);
         });
+
         ws.on("play", () => setIsPlaying(true));
         ws.on("pause", () => setIsPlaying(false));
         ws.on("finish", () => setIsPlaying(false));
@@ -42,11 +51,14 @@ export const AudioPlayer = ({ src, msgId, isMe, chatProps, onDurationChange, ava
     return () => {
       clearTimeout(initTimer);
       if (ws) {
-        try { ws.destroy(); } catch (e) { console.error(e); }
+        try {
+          ws.destroy();
+        } catch (e) {
+          console.error(e);
+        }
       }
     };
   }, [src, isMe]);
-
   useEffect(() => {
     if (activeAudioMemoId !== msgId && waveSurferRef.current && isPlaying) {
       waveSurferRef.current.pause();
@@ -64,6 +76,7 @@ export const AudioPlayer = ({ src, msgId, isMe, chatProps, onDurationChange, ava
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: '10px', width: "100%", boxSizing: "border-box", userSelect: "none", padding: '4px 2px 0px 0px' }}>
+      
       {/* Play / Pause circle button icon control */}
       <button 
         onClick={togglePlayPause} 
@@ -79,11 +92,7 @@ export const AudioPlayer = ({ src, msgId, isMe, chatProps, onDurationChange, ava
 
       {/* 🎯 SHOW AVATAR AT THE END OF SOUND WAVE */}
       {avatarUrl && (
-        <img 
-          src={avatarUrl} 
-          alt="" 
-          style={{ width: '22px', height: '22px', borderRadius: '50%', objectFit: 'cover', background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.1)', flexShrink: 0, display: 'block' }} 
-        />
+        <img src={avatarUrl} alt="" style={{ width: '22px', height: '22px', borderRadius: '50%', objectFit: 'cover', background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.1)', flexShrink: 0, display: 'block' }} />
       )}
     </div>
   );

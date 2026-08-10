@@ -3,15 +3,8 @@ import { Phone, Video, X, ArrowLeft, ChevronLeft, Shield, MessageSquare, Users }
 
 export const ChatHeader = ({ chatProps, resolveDrawerImgUrl }) => {
   const { 
-    setIsOpen, 
-    activeView, 
-    setActiveView, 
-    currentRoom, 
-    setCurrentRoom, 
-    activeUsersList = [], 
-    callState = 'idle', 
-    initiateCallSession, 
-    currentUserId 
+    setIsOpen, activeView, setActiveView, currentRoom, setCurrentRoom, 
+    activeUsersList = [], callState = 'idle', initiateCallSession, currentUserId 
   } = chatProps || {};
 
   // Fallback to internal lookup tool if not supplied from parent context
@@ -51,7 +44,25 @@ export const ChatHeader = ({ chatProps, resolveDrawerImgUrl }) => {
     }
   `;
   return (
-    <div style={{ padding: '0 14px', background: 'var(--bg-header, var(--bg-card, #0f172a))', color: 'var(--text-header, var(--text-primary, #ffffff))', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color, #1e293b)', boxSizing: 'border-box', height: '56px', width: '100%', fontFamily: 'system-ui, -apple-system, sans-serif', boxShadow: chatProps?.isHeaderGlassRef ? '0 10px 30px rgba(15, 23, 42, 0.08), 0 1px 3px rgba(0, 0, 0, 0.02)' : 'none', backdropFilter: chatProps?.isHeaderGlassRef ? 'blur(16px)' : 'none', WebkitBackdropFilter: chatProps?.isHeaderGlassRef ? 'blur(16px)' : 'none', transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)', position: 'relative', zIndex: 10 }}>
+    <div style={{ 
+      padding: '0 14px', 
+      background: 'var(--bg-header, var(--bg-card, #0f172a))', 
+      color: 'var(--text-header, var(--text-primary, #ffffff))', 
+      display: 'flex', 
+      alignItems: 'center', 
+      justifyContent: 'space-between', 
+      borderBottom: '1px solid var(--border-color, #1e293b)', 
+      boxSizing: 'border-box', 
+      height: '56px', 
+      width: '100%', 
+      fontFamily: 'system-ui, -apple-system, sans-serif', 
+      boxShadow: chatProps?.isHeaderGlassRef ? '0 10px 30px rgba(15, 23, 42, 0.08), 0 1px 3px rgba(0, 0, 0, 0.02)' : 'none', 
+      backdropFilter: chatProps?.isHeaderGlassRef ? 'blur(16px)' : 'none', 
+      WebkitBackdropFilter: chatProps?.isHeaderGlassRef ? 'blur(16px)' : 'none', 
+      transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)', 
+      position: 'relative', 
+      zIndex: 10 
+    }}>
       <style>{headerStyles}</style>
       
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
@@ -107,7 +118,6 @@ export const ChatHeader = ({ chatProps, resolveDrawerImgUrl }) => {
           </div>
         </div>
       </div>
-
       {/* RIGHT SIDE CONTROLS CONTROLLER ENGINE */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0, marginLeft: '12px' }}>
         {activeView === 'hub' && (
