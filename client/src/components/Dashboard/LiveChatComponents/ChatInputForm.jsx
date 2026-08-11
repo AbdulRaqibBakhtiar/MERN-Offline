@@ -1,14 +1,34 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Smile, Paperclip, Square, Mic, ArrowUp, X, FileText, AudioLines, Image, MapPin } from 'lucide-react';
+import {
+  Smile,
+  Paperclip,
+  Square,
+  Mic,
+  ArrowUp,
+  X,
+  FileText,
+  AudioLines,
+  Image,
+  MapPin,
+} from 'lucide-react';
 import EmojiPicker from 'emoji-picker-react';
 import { ReplyPreview } from './ReplyPreview';
 
 export const ChatInputForm = ({ chatProps }) => {
   const {
-    message, setMessage, showEmojiPicker, setShowEmojiPicker,
-    selectedFile, setSelectedFile, handleInputChange, handleFileChange,
-    handleSendMessage, socket, currentRoom, currentUserId,
-    replyingMessage, cancelReply, isUploading
+    message,
+    setMessage,
+    showEmojiPicker,
+    setShowEmojiPicker,
+    handleInputChange,
+    handleSendMessage,
+    socket,
+    currentRoom,
+    currentUserId,
+    replyingMessage,
+    cancelReply,
+    selectedFiles,
+    setSelectedFiles,
   } = chatProps || {};
 
   const [localRecording, setLocalRecording] = useState(false);
@@ -17,8 +37,10 @@ export const ChatInputForm = ({ chatProps }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
 
-  // 🎯 Dynamic UI Audio Wave Tracking States
-  const [waveHeights, setWaveHeights] = useState(Array(18).fill(12));
+  // Real-time microphone wave heights
+  const [waveHeights, setWaveHeights] = useState(
+    Array(24).fill(5)
+  );
 
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -27,37 +49,68 @@ export const ChatInputForm = ({ chatProps }) => {
   const formRef = useRef(null);
   const recordingStartTimeRef = useRef(0);
   const fileInputRef = useRef(null);
+
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
   const animationFrameRef = useRef(null);
+  const sourceRef = useRef(null);
+
+  // Prevent animation loops from being duplicated
+  const waveRunningRef = useRef(false);
 
   useEffect(() => {
     return () => {
-      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
-      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
-      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-      if (audioContextRef.current) audioContextRef.current.close().catch(() => { });
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
+
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      }
+
+      if (sourceRef.current) {
+        try {
+          sourceRef.current.disconnect();
+        } catch (_) {}
+      }
+
+      if (audioContextRef.current) {
+        audioContextRef.current.close().catch(() => {});
+      }
     };
   }, []);
 
   useEffect(() => {
-    if (localRecording) {
-      setLocalDuration(0);
+    if (localRecording && !isRecordPaused) {
       recordingTimerRef.current = setInterval(() => {
-        const totalElapsedSeconds = Math.floor((Date.now() - recordingStartTimeRef.current) / 1000);
-        setLocalDuration(totalElapsedSeconds);
-      }, 250);
+        const elapsed = Math.floor(
+          (Date.now() - recordingStartTimeRef.current) / 1000
+        );
+
+        setLocalDuration(elapsed);
+      }, 100);
     } else {
-      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
     }
+
     return () => {
-      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
     };
-  }, [localRecording]);
+  }, [localRecording, isRecordPaused]);
+
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (message?.trim() || selectedFile) {
+
+      if (message?.trim() || selectedFiles?.length > 0) {
         if (handleSendMessage) {
           handleSendMessage(e);
         } else if (formRef.current) {
@@ -69,7 +122,10 @@ export const ChatInputForm = ({ chatProps }) => {
 
   const handleDragOver = (e) => {
     e.preventDefault();
-    if (!localRecording) setIsDragging(true);
+
+    if (!localRecording) {
+      setIsDragging(true);
+    }
   };
 
   const handleDragLeave = (e) => {
@@ -80,48 +136,98 @@ export const ChatInputForm = ({ chatProps }) => {
   const handleDrop = (e) => {
     e.preventDefault();
     setIsDragging(false);
-    if (localRecording || !e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
 
-    const droppedFiles = e.dataTransfer.files;
-    const syntheticEvent = { target: { files: droppedFiles } };
-    handleUniversalFileChange(syntheticEvent);
+    if (
+      localRecording ||
+      !e.dataTransfer.files ||
+      e.dataTransfer.files.length === 0
+    ) {
+      return;
+    }
+
+    handleUniversalFileChange({
+      target: {
+        files: e.dataTransfer.files,
+      },
+    });
   };
 
-  // 🎯 FIXED: Properly checks if 'files' exists and extracts the first array item safely to prevent crashes
+  // ============================================================
+  // FILE HANDLING
+  // ============================================================
+
   const handleUniversalFileChange = (e) => {
-    const files = e?.target?.files;
-    if (!files || files.length === 0) return;
+    const files = Array.from(e?.target?.files || []);
 
-    const file = files[0];
-    const fileType = file.type ? file.type.toLowerCase() : '';
-    const fileName = file.name ? file.name.toLowerCase() : '';
-    const objectUrl = URL.createObjectURL(file);
+    if (files.length === 0) {
+      return;
+    }
 
-    setShowAttachmentMenu(false); // Close dropdown menu overlay upon selection
+    setShowAttachmentMenu(false);
 
-    if (fileType.startsWith('image/')) {
-      setSelectedFile({ name: file.name, url: objectUrl, type: 'image' });
-    } else if (fileType.startsWith('video/')) {
-      if (file.size > 15 * 1024 * 1024) {
-        alert("Video file size cannot exceed 15MB parameters.");
-        return;
+    const newFiles = [];
+
+    for (const file of files) {
+      const fileType = file.type?.toLowerCase() || '';
+
+      if (
+        fileType.startsWith('video/') &&
+        file.size > 15 * 1024 * 1024
+      ) {
+        alert(
+          `${file.name} is too large. Maximum video size is 15MB.`
+        );
+        continue;
       }
-      setSelectedFile({ name: file.name, url: objectUrl, type: 'video' });
-    } else if (fileType.startsWith('audio/')) {
-      setSelectedFile({ name: file.name, url: objectUrl, type: 'audio', durationText: 'Audio track' });
-    } else {
-      // Handles PDF, Office documents, ZIP, RAR, etc.
-      setSelectedFile({ name: file.name, url: objectUrl, type: 'file' });
+
+      const objectUrl = URL.createObjectURL(file);
+
+      let type = 'file';
+
+      if (fileType.startsWith('image/')) {
+        type = 'image';
+      } else if (fileType.startsWith('video/')) {
+        type = 'video';
+      } else if (fileType.startsWith('audio/')) {
+        type = 'audio';
+      }
+
+      newFiles.push({
+        name: file.name,
+        url: objectUrl,
+        rawFile: file,
+        type,
+        mimeType: file.type,
+        size: file.size,
+        ...(type === 'audio'
+          ? { durationText: 'Audio track' }
+          : {}),
+      });
+    }
+
+    if (newFiles.length > 0) {
+      setSelectedFiles((prev) => [...prev, ...newFiles]);
+    }
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   };
+
+  // ============================================================
+  // LOCATION
+  // ============================================================
 
   const handleShareLocationCoordinates = (e) => {
     e.preventDefault();
     e.stopPropagation();
+
     setShowAttachmentMenu(false);
 
     if (!navigator.geolocation) {
-      alert("Geolocation utilities are not supported by this browser configuration.");
+      alert(
+        'Geolocation is not supported by this browser.'
+      );
       return;
     }
 
@@ -129,448 +235,1501 @@ export const ChatInputForm = ({ chatProps }) => {
       (position) => {
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
-        const mapsLinkString = `📍 Current Location: https://google.com{lat},${lng}`;
+
+        const mapsLinkString =
+          `📍 Current Location: ` +
+          `https://www.google.com/maps?q=${lat},${lng}`;
 
         if (socket && currentRoom) {
-          const roomId = currentRoom.id || currentRoom._id;
+          const roomId =
+            currentRoom.id || currentRoom._id;
+
           socket.emit('send_message', {
             room: roomId,
             senderId: currentUserId,
-            senderName: chatProps?.currentUsername || "Support Officer",
+            senderName:
+              chatProps?.currentUsername ||
+              'Support Officer',
             message: mapsLinkString,
-            type: "text",
-            createdAt: new Date()
+            type: 'text',
+            createdAt: new Date(),
           });
-          if (setMessage) setMessage('');
+
+          if (setMessage) {
+            setMessage('');
+          }
         }
       },
       () => {
-        alert("Unable to fetch exact hardware GPS coordinate positioning safely.");
+        alert(
+          'Unable to obtain your current location.'
+        );
       },
-      { enableHighAccuracy: true, timeout: 7000 }
+      {
+        enableHighAccuracy: true,
+        timeout: 7000,
+      }
     );
   };
 
-  // 🎯 Dynamic Sound Wave Engine: Reads raw microphone decibels continuously
-  const visualizeLiveMicrophoneStream = () => {
-    if (!analyserRef.current) return;
-    const bufferLength = analyserRef.current.frequencyBinCount;
+  // ============================================================
+  // REAL MICROPHONE WAVEFORM
+  //
+  // IMPORTANT:
+  // We use getByteTimeDomainData(), not frequency bins.
+  //
+  // This measures the actual microphone waveform and calculates
+  // RMS volume every animation frame (~60fps).
+  // ============================================================
+
+  const stopWaveAnimation = () => {
+    waveRunningRef.current = false;
+
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+  };
+
+  const startWaveAnimation = () => {
+    if (!analyserRef.current) {
+      return;
+    }
+
+    if (waveRunningRef.current) {
+      return;
+    }
+
+    waveRunningRef.current = true;
+
+    const analyser = analyserRef.current;
+
+    // Time-domain buffer.
+    const bufferLength = analyser.fftSize;
     const dataArray = new Uint8Array(bufferLength);
 
-    const updateWaveData = () => {
-      if (!localRecording && !analyserRef.current) return;
-      analyserRef.current.getByteFrequencyData(dataArray);
+    const BAR_COUNT = 24;
 
-      // Map raw spectrum amplitudes down to 18 clean bar height percentages
-      const nextHeights = Array.from({ length: 18 }, (_, i) => {
-        const value = dataArray[Math.floor(i * (bufferLength / 18))] || 0;
-        // Clamp height calculation constraints between 4px minimum and 32px maximum
-        return Math.max(4, Math.min(32, (value / 255) * 32));
+    const updateWaveData = () => {
+      if (
+        !waveRunningRef.current ||
+        !analyserRef.current
+      ) {
+        return;
+      }
+
+      analyser.getByteTimeDomainData(dataArray);
+
+      // Calculate RMS amplitude from the REAL microphone signal.
+      let sumSquares = 0;
+
+      for (let i = 0; i < bufferLength; i++) {
+        const normalized =
+          (dataArray[i] - 128) / 128;
+
+        sumSquares += normalized * normalized;
+      }
+
+      const rms = Math.sqrt(
+        sumSquares / bufferLength
+      );
+
+      /*
+       * Amplify normal speech.
+       *
+       * A quiet microphone can have RMS around 0.005-0.02.
+       * Normal speech can be considerably higher.
+       */
+      const amplified = Math.min(
+        1,
+        rms * 8
+      );
+
+      /*
+       * Smooth enough to look natural but NOT delayed.
+       *
+       * 0.65 current + 0.35 previous gives fast response.
+       */
+      setWaveHeights((previous) => {
+        const next = [];
+
+        for (let i = 0; i < BAR_COUNT; i++) {
+          /*
+           * Give each bar a slightly different response.
+           * This creates a natural waveform instead of
+           * making every bar identical.
+           */
+          const centerDistance =
+            Math.abs(
+              i - (BAR_COUNT - 1) / 2
+            ) /
+            ((BAR_COUNT - 1) / 2);
+
+          const centerBoost =
+            1 - centerDistance * 0.25;
+
+          // Tiny deterministic variation.
+          const variation =
+            0.88 +
+            ((i * 17) % 13) / 100;
+
+          const target =
+            amplified *
+            30 *
+            centerBoost *
+            variation;
+
+          const previousHeight =
+            previous[i] || 5;
+
+          const smoothed =
+            previousHeight * 0.35 +
+            Math.max(4, target) * 0.65;
+
+          next.push(
+            Math.max(
+              4,
+              Math.min(30, smoothed)
+            )
+          );
+        }
+
+        return next;
       });
 
-      setWaveHeights(nextHeights);
-      animationFrameRef.current = requestAnimationFrame(updateWaveData);
+      animationFrameRef.current =
+        requestAnimationFrame(updateWaveData);
     };
 
     updateWaveData();
   };
 
+  // ============================================================
+  // START RECORDING
+  // ============================================================
+
   const localStartRecordingAction = async (e) => {
     e.preventDefault();
     e.stopPropagation();
+
+    if (localRecording) {
+      return;
+    }
+
     audioChunksRef.current = [];
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      const stream =
+        await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+          video: false,
+        });
+
       streamRef.current = stream;
 
-      // 🎯 Route audio track down into standard HTML5 Web Audio Analyser
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      const audioContext = new AudioContextClass();
-      const analyser = audioContext.createAnalyser();
-      const source = audioContext.createMediaStreamSource(stream);
+      // ----------------------------------------
+      // AudioContext
+      // ----------------------------------------
 
-      analyser.fftSize = 64;
-      source.connect(analyser);
+      const AudioContextClass =
+        window.AudioContext ||
+        window.webkitAudioContext;
+
+      if (!AudioContextClass) {
+        throw new Error(
+          'Web Audio API is not supported.'
+        );
+      }
+
+      const audioContext =
+        new AudioContextClass();
 
       audioContextRef.current = audioContext;
-      analyserRef.current = analyser;
 
-      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+      // Some browsers initially suspend AudioContext.
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume();
+      }
+
+      const analyser =
+        audioContext.createAnalyser();
+
+      /*
+       * Lower fftSize = faster responsive waveform.
+       *
+       * We only need amplitude, so 512 is plenty.
+       */
+      analyser.fftSize = 512;
+
+      /*
+       * smoothingTimeConstant is intentionally LOW.
+       *
+       * High values create the delayed/bouncy feeling.
+       */
+      analyser.smoothingTimeConstant = 0.15;
+
+      analyser.minDecibels = -90;
+      analyser.maxDecibels = -10;
+
+      const source =
+        audioContext.createMediaStreamSource(
+          stream
+        );
+
+      source.connect(analyser);
+
+      analyserRef.current = analyser;
+      sourceRef.current = source;
+
+      // ----------------------------------------
+      // MediaRecorder
+      // ----------------------------------------
+
+      let mimeType = 'audio/webm;codecs=opus';
+
+      if (
+        !MediaRecorder.isTypeSupported(
+          mimeType
+        )
+      ) {
+        mimeType = 'audio/webm';
+      }
+
+      if (
+        !MediaRecorder.isTypeSupported(
+          mimeType
+        )
+      ) {
+        mimeType = '';
+      }
+
+      const recorder = mimeType
+        ? new MediaRecorder(stream, {
+            mimeType,
+          })
+        : new MediaRecorder(stream);
+
       mediaRecorderRef.current = recorder;
 
       recorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) audioChunksRef.current.push(event.data);
+        if (
+          event.data &&
+          event.data.size > 0
+        ) {
+          audioChunksRef.current.push(
+            event.data
+          );
+        }
       };
 
       recorder.onstop = () => {
-        if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-        if (audioContextRef.current) audioContextRef.current.close().catch(() => { });
+        stopWaveAnimation();
 
-        const timeElapsedInMs = Date.now() - recordingStartTimeRef.current;
-        const totalDurationSeconds = Math.round(timeElapsedInMs / 1000) || 1;
-        let durationLabel = `${totalDurationSeconds} sec`;
-
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm;codecs=opus' });
-        const efficientObjectUrl = URL.createObjectURL(audioBlob);
-        if (setSelectedFile) {
-          setSelectedFile({ name: `Voice Note`, url: efficientObjectUrl, rawFile: audioBlob, type: 'audio', durationText: durationLabel });
+        if (sourceRef.current) {
+          try {
+            sourceRef.current.disconnect();
+          } catch (_) {}
         }
-        stream.getTracks().forEach(track => track.stop());
-        setLocalRecording(false);
 
-        stream.getTracks().forEach(track => track.stop());
+        if (audioContextRef.current) {
+          audioContextRef.current
+            .close()
+            .catch(() => {});
+        }
+
+        sourceRef.current = null;
+        analyserRef.current = null;
+        audioContextRef.current = null;
+
+        const elapsedMs =
+          Date.now() -
+          recordingStartTimeRef.current;
+
+        const totalDurationSeconds =
+          Math.max(
+            1,
+            Math.round(elapsedMs / 1000)
+          );
+
+        const audioBlob = new Blob(
+          audioChunksRef.current,
+          {
+            type:
+              mimeType ||
+              'audio/webm',
+          }
+        );
+
+        const audioUrl =
+          URL.createObjectURL(audioBlob);
+
+        if (setSelectedFiles) {
+          setSelectedFiles((prev) => [
+            ...prev,
+            {
+              name: 'Voice Note',
+              url: audioUrl,
+              rawFile: audioBlob,
+              type: 'audio',
+              durationText:
+                `${totalDurationSeconds} sec`,
+              mimeType:
+                mimeType ||
+                'audio/webm',
+              size: audioBlob.size,
+            },
+          ]);
+        }
+
+        if (streamRef.current) {
+          streamRef.current
+            .getTracks()
+            .forEach((track) =>
+              track.stop()
+            );
+        }
+
+        streamRef.current = null;
+
         setLocalRecording(false);
         setIsRecordPaused(false);
+        setLocalDuration(0);
+        setWaveHeights(
+          Array(24).fill(5)
+        );
       };
 
-      recordingStartTimeRef.current = Date.now();
-      recorder.start(100);
-      setLocalRecording(true);
+      recordingStartTimeRef.current =
+        Date.now();
 
-      // Ignite live canvas animation triggers instantly
-      visualizeLiveMicrophoneStream();
+      recorder.start(100);
+
+      setLocalRecording(true);
+      setIsRecordPaused(false);
+      setLocalDuration(0);
+
+      // Start immediately after recording begins.
+      startWaveAnimation();
     } catch (err) {
-      console.error("Microphone configuration access blocked:", err);
+      console.error(
+        'Microphone configuration access blocked:',
+        err
+      );
+
+      stopWaveAnimation();
+
+      if (streamRef.current) {
+        streamRef.current
+          .getTracks()
+          .forEach((track) =>
+            track.stop()
+          );
+      }
+
+      streamRef.current = null;
+
+      alert(
+        'Microphone access could not be started.'
+      );
     }
   };
+
+  // ============================================================
+  // STOP / SAVE
+  // ============================================================
 
   const localStopRecordingAction = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+
+    if (
+      mediaRecorderRef.current &&
+      mediaRecorderRef.current.state !==
+        'inactive'
+    ) {
       mediaRecorderRef.current.stop();
     }
   };
+
+  // ============================================================
+  // PAUSE / RESUME
+  // ============================================================
+
   const toggleRecordingPauseAction = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!mediaRecorderRef.current) return;
 
-    if (mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.pause();
+    const recorder =
+      mediaRecorderRef.current;
+
+    if (!recorder) {
+      return;
+    }
+
+    if (recorder.state === 'recording') {
+      recorder.pause();
+
       setIsRecordPaused(true);
-      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
 
-      // 🎯 PATCH: Cancels the soundwave animation loop instantly to freeze the waves
-      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-    } else if (mediaRecorderRef.current.state === 'paused') {
-      mediaRecorderRef.current.play?.() || mediaRecorderRef.current.resume();
+      stopWaveAnimation();
+    } else if (
+      recorder.state === 'paused'
+    ) {
+      recorder.resume();
+
       setIsRecordPaused(false);
 
-      recordingTimerRef.current = setInterval(() => {
-        const totalElapsedSeconds = Math.floor((Date.now() - recordingStartTimeRef.current) / 1000);
-        setLocalDuration(totalElapsedSeconds);
-      }, 250);
+      /*
+       * AudioContext can sometimes become suspended
+       * after a pause/resume.
+       */
+      if (
+        audioContextRef.current &&
+        audioContextRef.current.state ===
+          'suspended'
+      ) {
+        audioContextRef.current
+          .resume()
+          .catch(() => {});
+      }
 
-      // 🎯 PATCH: Restarts the soundwave animation loop smoothly when resuming
-      visualizeLiveMicrophoneStream();
+      startWaveAnimation();
     }
   };
-  // 🎯 PATCH: Handles discarding the live recording and resetting your stream contexts safely
+
+  // ============================================================
+  // CANCEL RECORDING
+  // ============================================================
+
   const localCancelRecordingAction = (e) => {
     e.preventDefault();
     e.stopPropagation();
 
-    if (mediaRecorderRef.current) {
-      // Temporarily clear the onstop handler so it doesn't trigger a file preview card load
-      mediaRecorderRef.current.onstop = null;
-      if (mediaRecorderRef.current.state !== 'inactive') {
-        mediaRecorderRef.current.stop();
+    const recorder =
+      mediaRecorderRef.current;
+
+    if (recorder) {
+      recorder.onstop = null;
+
+      if (recorder.state !== 'inactive') {
+        recorder.stop();
       }
     }
 
-    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-    if (audioContextRef.current) audioContextRef.current.close().catch(() => { });
-    if (streamRef.current) streamRef.current.getTracks().forEach(track => track.stop());
+    stopWaveAnimation();
 
-    // Reset all recording variables to default resting state values
+    if (sourceRef.current) {
+      try {
+        sourceRef.current.disconnect();
+      } catch (_) {}
+    }
+
+    if (audioContextRef.current) {
+      audioContextRef.current
+        .close()
+        .catch(() => {});
+    }
+
+    if (streamRef.current) {
+      streamRef.current
+        .getTracks()
+        .forEach((track) =>
+          track.stop()
+        );
+    }
+
+    mediaRecorderRef.current = null;
+    sourceRef.current = null;
+    analyserRef.current = null;
+    audioContextRef.current = null;
+    streamRef.current = null;
+
     setLocalRecording(false);
     setIsRecordPaused(false);
     setLocalDuration(0);
-    setWaveHeights(Array(18).fill(12));
+    setWaveHeights(
+      Array(24).fill(5)
+    );
   };
-
 
   const formatRecordingTime = (secs) => {
     const mins = Math.floor(secs / 60);
     const remain = secs % 60;
-    return `${mins}:${remain < 10 ? '0' : ''}${remain}`;
+
+    return `${mins}:${
+      remain < 10 ? '0' : ''
+    }${remain}`;
   };
+
+  // ============================================================
+  // RENDER
+  // ============================================================
+
   return (
-    <div style={{ background: 'var(--bg-card, #ffffff)', borderTop: '1px solid var(--border-color, #e2e8f0)', position: 'relative', fontFamily: 'inherit' }}>
-      <style>{`
-        .whatsapp-attach-btn { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 14px; border: none; background: transparent; color: #475569; font-size: 0.8rem; font-weight: 500; cursor: pointer; text-align: left; transition: background 0.15s ease; }
-        .whatsapp-attach-btn:hover { background: #f1f5f9; }
-        .custom-input-scroll::-webkit-scrollbar { width: 4px; }
-        .custom-input-scroll::-webkit-scrollbar-track { background: transparent; }
-        .custom-input-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-        .live-mic-wave-bar { width: 3px; background: #ef4444; border-radius: 2px; transition: height 0.05s ease; transform-origin: center; }
-        @keyframes recordingIndicatorFlash { from { opacity: 1; } to { opacity: 0.3; } }
-        @keyframes containerPulseGlow { 0% { box-shadow: 0 1px 3px rgba(15,23,42,0.03); } 50% { box-shadow: 0 0 8px rgba(239, 68, 68, 0.2); } 100% { box-shadow: 0 1px 3px rgba(15,23,42,0.03); } }
-        @keyframes mediaCardReveal { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes supportDeskUploadSpin { to { transform: rotate(360deg); } }
-      `}</style>
+    <div
+      style={{
+        background:
+          'var(--bg-card, #ffffff)',
+        borderTop:
+          '1px solid var(--border-color, #e2e8f0)',
+        position: 'relative',
+        fontFamily: 'inherit',
+      }}
+    >
+      <style>
+        {`
+          .whatsapp-attach-btn {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            padding: 10px 14px;
+            border: none;
+            background: transparent;
+            color: #475569;
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            text-align: left;
+            transition: background 0.15s ease;
+          }
+
+          .whatsapp-attach-btn:hover {
+            background: #f1f5f9;
+          }
+
+          .custom-input-scroll::-webkit-scrollbar {
+            width: 4px;
+          }
+
+          .custom-input-scroll::-webkit-scrollbar-track {
+            background: transparent;
+          }
+
+          .custom-input-scroll::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+          }
+
+          .live-mic-wave-bar {
+            width: 2px;
+            min-width: 2px;
+            background: #ef4444;
+            border-radius: 3px;
+            transform-origin: center;
+            will-change: height;
+          }
+
+          @keyframes recordingIndicatorFlash {
+            from {
+              opacity: 1;
+            }
+
+            to {
+              opacity: 0.3;
+            }
+          }
+
+          @keyframes containerPulseGlow {
+            0% {
+              box-shadow:
+                0 1px 3px
+                rgba(15, 23, 42, 0.03);
+            }
+
+            50% {
+              box-shadow:
+                0 0 8px
+                rgba(239, 68, 68, 0.2);
+            }
+
+            100% {
+              box-shadow:
+                0 1px 3px
+                rgba(15, 23, 42, 0.03);
+            }
+          }
+
+          @keyframes mediaCardReveal {
+            from {
+              opacity: 0;
+              transform: translateY(5px);
+            }
+
+            to {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
+        `}
+      </style>
+
+      {/* ======================================================
+          REPLY PREVIEW
+      ====================================================== */}
 
       {replyingMessage && (
-        <ReplyPreview replyingMessage={replyingMessage} onCancel={cancelReply} currentUsername={chatProps?.currentUsername} />
+        <ReplyPreview
+          replyingMessage={replyingMessage}
+          onCancel={cancelReply}
+          currentUsername={
+            chatProps?.currentUsername
+          }
+        />
       )}
 
-      {/* WHATSAPP STYLE ATTACHMENTS POP-UP DROPDOWN MENU */}
+      {/* ======================================================
+          ATTACHMENT MENU
+      ====================================================== */}
+
       {showAttachmentMenu && (
-        <div style={{
-          position: 'absolute', bottom: 'calc(100% + 8px)', left: '44px',
-          background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px',
-          boxShadow: '0 8px 24px rgba(15, 23, 42, 0.12)', zIndex: 10005,
-          width: '175px', overflow: 'hidden', display: 'flex', flexDirection: 'column',
-          animation: 'mediaCardReveal 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards'
-        }}>
-          <button type="button" onClick={() => { fileInputRef.current.accept = ".pdf,.doc,.docx,.xls,.xlsx,.zip,.rar,.7z"; fileInputRef.current.click(); }} className="whatsapp-attach-btn">
-            <FileText size={15} color="#2563eb" /> <span>Document File</span>
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 'calc(100% + 8px)',
+            left: '44px',
+            background: '#ffffff',
+            border:
+              '1px solid #e2e8f0',
+            borderRadius: '12px',
+            boxShadow:
+              '0 8px 24px rgba(15, 23, 42, 0.12)',
+            zIndex: 10005,
+            width: '175px',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+            animation:
+              'mediaCardReveal 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+          }}
+        >
+          <button
+            type="button"
+            className="whatsapp-attach-btn"
+            onClick={() => {
+              fileInputRef.current.accept =
+                '.pdf,.doc,.docx,.xls,.xlsx,.zip,.rar,.7z';
+
+              fileInputRef.current.click();
+
+              setShowAttachmentMenu(false);
+            }}
+          >
+            <FileText
+              size={15}
+              color="#2563eb"
+            />
+
+            <span>
+              Document File
+            </span>
           </button>
-          <button type="button" onClick={() => { fileInputRef.current.accept = "image/*,video/*"; fileInputRef.current.click(); }} className="whatsapp-attach-btn">
-            <Image size={15} color="#ec4899" /> <span>Photo or Video</span>
+
+          <button
+            type="button"
+            className="whatsapp-attach-btn"
+            onClick={() => {
+              fileInputRef.current.accept =
+                'image/*,video/*';
+
+              fileInputRef.current.click();
+
+              setShowAttachmentMenu(false);
+            }}
+          >
+            <Image
+              size={15}
+              color="#ec4899"
+            />
+
+            <span>
+              Photo or Video
+            </span>
           </button>
-          <button type="button" onClick={handleShareLocationCoordinates} className="whatsapp-attach-btn" style={{ borderTop: '1px solid #f1f5f9' }}>
-            <MapPin size={15} color="#22c55e" /> <span>Share Location</span>
+
+          {/* AUDIO */}
+          <button
+            type="button"
+            className="whatsapp-attach-btn"
+            onClick={() => {
+              fileInputRef.current.accept =
+                'audio/*';
+
+              fileInputRef.current.click();
+
+              setShowAttachmentMenu(false);
+            }}
+          >
+            <AudioLines
+              size={15}
+              color="#8b5cf6"
+            />
+
+            <span>
+              Audio
+            </span>
+          </button>
+
+          <button
+            type="button"
+            className="whatsapp-attach-btn"
+            onClick={
+              handleShareLocationCoordinates
+            }
+            style={{
+              borderTop:
+                '1px solid #f1f5f9',
+            }}
+          >
+            <MapPin
+              size={15}
+              color="#22c55e"
+            />
+
+            <span>
+              Share Location
+            </span>
           </button>
         </div>
       )}
 
-      <input type="file" ref={fileInputRef} onChange={handleUniversalFileChange} style={{ display: 'none' }} />
+      {/* Hidden file input */}
+
+      <input
+        type="file"
+        ref={fileInputRef}
+        multiple
+        accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.zip,.rar,.7z"
+        onChange={
+          handleUniversalFileChange
+        }
+        style={{
+          display: 'none',
+        }}
+      />
+
+      {/* ======================================================
+          EMOJI PICKER
+      ====================================================== */}
 
       {showEmojiPicker && (
-        <div style={{ position: 'absolute', bottom: '100%', left: '12px', zIndex: 10000, paddingBottom: '12px', filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.05))' }}>
-          <EmojiPicker onEmojiClick={(ed) => {
-            if (chatProps?.emojiTargetMessageId) {
-              chatProps.triggerAddReaction?.(chatProps.emojiTargetMessageId, ed.emoji);
-              chatProps.setEmojiTargetMessageId?.(null);
-            } else {
-              setMessage(p => p + ed.emoji);
-            }
-            setShowEmojiPicker(false);
-          }} width={300} height={360} searchDisabled previewConfig={{ showPreview: false }} />
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '100%',
+            left: '12px',
+            zIndex: 10000,
+            paddingBottom: '12px',
+            filter:
+              'drop-shadow(0 4px 12px rgba(0,0,0,0.05))',
+          }}
+        >
+          <EmojiPicker
+            onEmojiClick={(emojiData) => {
+              if (
+                chatProps?.emojiTargetMessageId
+              ) {
+                chatProps.triggerAddReaction?.(
+                  chatProps.emojiTargetMessageId,
+                  emojiData.emoji
+                );
+
+                chatProps.setEmojiTargetMessageId?.(
+                  null
+                );
+              } else {
+                setMessage?.(
+                  (prev) =>
+                    `${prev || ''}${emojiData.emoji}`
+                );
+              }
+
+              setShowEmojiPicker(false);
+            }}
+            width={300}
+            height={360}
+            searchDisabled
+            previewConfig={{
+              showPreview: false,
+            }}
+          />
         </div>
       )}
 
-      {/* Selected File Pre-send Staging Card row */}
-      {selectedFile && (
-        <div style={{ background: '#ffffff', padding: '10px 14px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', animation: 'mediaCardReveal 0.2s ease-out', position: 'relative' }}>
-          {isUploading && (
-            <div style={{ position: 'absolute', inset: 0, background: 'rgba(255, 255, 255, 0.85)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', backdropFilter: 'blur(2px)' }}>
-              <div style={{ width: '14px', height: '14px', border: '2px solid #e2e8f0', borderTop: '2px solid #2563eb', borderRadius: '50%', animation: 'supportDeskUploadSpin 0.7s linear infinite' }} />
-              <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#2563eb' }}>Processing Media...</span>
-            </div>
+      {/* ======================================================
+          SELECTED FILES
+      ====================================================== */}
+
+      {selectedFiles?.length > 0 && (
+        <div
+          style={{
+            background: '#ffffff',
+            padding: '10px 14px',
+            borderBottom:
+              '1px solid #f1f5f9',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+            maxHeight: '180px',
+            overflowY: 'auto',
+          }}
+        >
+          {selectedFiles.map(
+            (file, index) => (
+              <div
+                key={`${file.name}-${index}`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  padding: '6px',
+                  border:
+                    '1px solid #e2e8f0',
+                  borderRadius: '8px',
+                  background: '#f8fafc',
+                }}
+              >
+                {/* Preview */}
+
+                {file.type === 'image' ? (
+                  <img
+                    src={file.url}
+                    alt=""
+                    style={{
+                      width: '48px',
+                      height: '42px',
+                      objectFit: 'cover',
+                      borderRadius: '5px',
+                      flexShrink: 0,
+                    }}
+                  />
+                ) : file.type === 'video' ? (
+                  <video
+                    src={file.url}
+                    muted
+                    playsInline
+                    style={{
+                      width: '48px',
+                      height: '42px',
+                      objectFit: 'cover',
+                      borderRadius: '5px',
+                      background: '#000',
+                      flexShrink: 0,
+                    }}
+                  />
+                ) : file.type === 'audio' ? (
+                  <div
+                    style={{
+                      width: '42px',
+                      height: '42px',
+                      borderRadius: '6px',
+                      background:
+                        '#eff6ff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#2563eb',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <AudioLines
+                      size={18}
+                    />
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      width: '42px',
+                      height: '42px',
+                      borderRadius: '6px',
+                      background:
+                        '#eff6ff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#2563eb',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <FileText
+                      size={18}
+                    />
+                  </div>
+                )}
+
+                {/* File name */}
+
+                <div
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    display: 'flex',
+                    flexDirection:
+                      'column',
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize:
+                        '0.58rem',
+                      color: '#64748b',
+                      fontWeight: 700,
+                      textTransform:
+                        'uppercase',
+                    }}
+                  >
+                    {file.type}
+                  </span>
+
+                  <span
+                    style={{
+                      fontSize:
+                        '0.78rem',
+                      color: '#0f172a',
+                      overflow:
+                        'hidden',
+                      textOverflow:
+                        'ellipsis',
+                      whiteSpace:
+                        'nowrap',
+                    }}
+                  >
+                    {file.name}
+                  </span>
+                </div>
+
+                {/* Remove */}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (
+                      file.url?.startsWith(
+                        'blob:'
+                      )
+                    ) {
+                      URL.revokeObjectURL(
+                        file.url
+                      );
+                    }
+
+                    setSelectedFiles(
+                      (prev) =>
+                        prev.filter(
+                          (_, i) =>
+                            i !== index
+                        )
+                    );
+                  }}
+                  style={{
+                    border: 'none',
+                    background:
+                      'rgba(239, 68, 68, 0.06)',
+                    width: '26px',
+                    height: '26px',
+                    borderRadius: '5px',
+                    color: '#ef4444',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems:
+                      'center',
+                    justifyContent:
+                      'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            )
           )}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
-            {selectedFile.type === 'image' ? (
-              <div style={{ position: 'relative', width: 'auto', maxWidth: '54px', height: '38px', overflow: 'hidden', border: '1px solid #e2e8f0', flexShrink: 0, background: '#f8fafc' }}>
-                <img src={selectedFile.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-              </div>
-            ) : selectedFile.type === 'video' ? (
-              <div style={{ position: 'relative', width: 'auto', maxWidth: '54px', height: '38px', overflow: 'hidden', border: '1px solid #e2e8f0', flexShrink: 0, background: '#000000' }}>
-                <video src={selectedFile.url} muted autoPlay loop playsInline style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-              </div>
-            ) : selectedFile.type === 'audio' ? (
-              <div style={{ width: '36px', height: '36px', borderRadius: '4px', background: 'rgba(37, 99, 235, 0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2563eb', flexShrink: 0 }}>
-                <AudioLines size={16} strokeWidth={2} />
-              </div>
-            ) : (
-              <div style={{ width: '36px', height: '36px', borderRadius: '4px', background: 'rgba(37, 99, 235, 0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2563eb', flexShrink: 0 }}>
-                <FileText size={16} />
-              </div>
-            )}
-            <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1, textAlignment: 'left', textAlign: 'left' }}>
-              <span style={{ fontSize: '0.58rem', color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
-                {selectedFile.type === 'video' ? 'Video Clip' : selectedFile.type === 'audio' ? 'Voice Memo' : 'Attachment Asset'}
-              </span>
-              <span style={{ fontSize: '0.78rem', color: '#0f172a', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {selectedFile.name}
-              </span>
-            </div>
-          </div>
-          <button type="button" onClick={() => setSelectedFile(null)} style={{ border: 'none', background: 'rgba(239, 68, 68, 0.06)', width: '24px', height: '24px', borderRadius: '4px', color: '#ef4444', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <X size={13} strokeWidth={2.5} />
-          </button>
+
+          {/* Clear all */}
+
+          {selectedFiles.length > 1 && (
+            <button
+              type="button"
+              onClick={() => {
+                selectedFiles.forEach(
+                  (file) => {
+                    if (
+                      file.url?.startsWith(
+                        'blob:'
+                      )
+                    ) {
+                      URL.revokeObjectURL(
+                        file.url
+                      );
+                    }
+                  }
+                );
+
+                setSelectedFiles([]);
+              }}
+              style={{
+                alignSelf: 'flex-end',
+                border: 'none',
+                background:
+                  'transparent',
+                color: '#ef4444',
+                fontSize: '0.7rem',
+                cursor: 'pointer',
+                padding: '2px 5px',
+              }}
+            >
+              Clear all
+            </button>
+          )}
         </div>
       )}
 
-      {/* Main Composition Entry Bar Form Wrapper */}
-      <form ref={formRef} onSubmit={handleSendMessage} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} style={{ margin: '10px 12px', padding: '6px 10px', display: 'flex', flexDirection: 'row', alignItems: 'flex-end', gap: '8px', background: isDragging ? '#f0f7ff' : '#ffffff', border: isDragging ? '1px dashed #2563eb' : '1px solid #e2e8f0', borderRadius: '6px', boxSizing: 'border-box', boxShadow: '0 1px 3px rgba(15, 23, 42, 0.03)', transition: 'all 0.2s ease', animation: localRecording ? 'containerPulseGlow 2s infinite ease-in-out' : 'none' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1px', flexShrink: 0, opacity: isDragging ? 0.2 : 1 }}>
-          <button type="button" disabled={localRecording} onClick={() => { setShowEmojiPicker(!showEmojiPicker); setShowAttachmentMenu(false); }} style={{ border: 'none', background: 'transparent', color: localRecording ? '#cbd5e1' : '#64748b', cursor: localRecording ? 'not-allowed' : 'pointer', width: '30px', height: '34px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '4px' }}><Smile size={16} /></button>
+      {/* ======================================================
+          MAIN INPUT
+      ====================================================== */}
 
-          <button type="button" disabled={localRecording} onClick={() => { setShowAttachmentMenu(!showAttachmentMenu); setShowEmojiPicker(false); }} style={{ border: 'none', background: 'transparent', color: localRecording ? '#cbd5e1' : '#64748b', cursor: localRecording ? 'not-allowed' : 'pointer', width: '30px', height: '34px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '4px' }}><Paperclip size={16} /></button>
+      <form
+        ref={formRef}
+        onSubmit={handleSendMessage}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        style={{
+          margin: '10px 12px',
+          padding: '6px 10px',
+          display: 'flex',
+          flexDirection: 'row',
+          alignItems: 'flex-end',
+          gap: '8px',
+          background: isDragging
+            ? '#f0f7ff'
+            : '#ffffff',
+          border: isDragging
+            ? '1px dashed #2563eb'
+            : '1px solid #e2e8f0',
+          borderRadius: '6px',
+          boxSizing: 'border-box',
+          boxShadow:
+            '0 1px 3px rgba(15, 23, 42, 0.03)',
+          transition: 'all 0.2s ease',
+          animation: localRecording
+            ? 'containerPulseGlow 2s infinite ease-in-out'
+            : 'none',
+        }}
+      >
+        {/* LEFT CONTROLS */}
+
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '1px',
+            flexShrink: 0,
+            opacity: isDragging
+              ? 0.2
+              : 1,
+          }}
+        >
+          {/* EMOJI */}
+
+          <button
+            type="button"
+            disabled={localRecording}
+            onClick={() => {
+              setShowEmojiPicker(
+                !showEmojiPicker
+              );
+
+              setShowAttachmentMenu(
+                false
+              );
+            }}
+            style={{
+              border: 'none',
+              background: 'transparent',
+              color: localRecording
+                ? '#cbd5e1'
+                : '#64748b',
+              cursor: localRecording
+                ? 'not-allowed'
+                : 'pointer',
+              width: '30px',
+              height: '34px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: '4px',
+            }}
+          >
+            <Smile size={16} />
+          </button>
+
+          {/* PAPERCLIP */}
+
+          <button
+            type="button"
+            disabled={localRecording}
+            onClick={() => {
+              setShowAttachmentMenu(
+                !showAttachmentMenu
+              );
+
+              setShowEmojiPicker(
+                false
+              );
+            }}
+            style={{
+              border: 'none',
+              background: 'transparent',
+              color: localRecording
+                ? '#cbd5e1'
+                : '#64748b',
+              cursor: localRecording
+                ? 'not-allowed'
+                : 'pointer',
+              width: '30px',
+              height: '34px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: '4px',
+            }}
+          >
+            <Paperclip size={16} />
+          </button>
+
+          {/* RECORDING CONTROLS */}
 
           {localRecording ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-              {/* 🎯 Pause / Resume Button Icon Toggler */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                flexShrink: 0,
+              }}
+            >
               <button
                 type="button"
-                onClick={toggleRecordingPauseAction}
+                onClick={
+                  toggleRecordingPauseAction
+                }
                 style={{
                   border: 'none',
-                  background: isRecordPaused ? '#2563eb' : '#f1f5f9',
-                  color: isRecordPaused ? '#ffffff' : '#475569',
+                  background:
+                    isRecordPaused
+                      ? '#2563eb'
+                      : '#f1f5f9',
+                  color:
+                    isRecordPaused
+                      ? '#ffffff'
+                      : '#475569',
                   cursor: 'pointer',
                   width: '32px',
                   height: '32px',
                   display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
+                  alignItems:
+                    'center',
+                  justifyContent:
+                    'center',
                   borderRadius: '50%',
                   fontSize: '0.75rem',
                   fontWeight: 'bold',
-                  transition: 'all 0.2s'
                 }}
-                title={isRecordPaused ? "Resume Recording" : "Pause Recording"}
+                title={
+                  isRecordPaused
+                    ? 'Resume Recording'
+                    : 'Pause Recording'
+                }
               >
-                {isRecordPaused ? "▶" : "||"}
+                {isRecordPaused
+                  ? '▶'
+                  : '||'}
               </button>
 
-              {/* 🎯 Stop & Save Voice Blob Check Indicator Button */}
               <button
                 type="button"
-                onClick={localStopRecordingAction}
+                onClick={
+                  localStopRecordingAction
+                }
                 style={{
                   border: 'none',
-                  background: '#ef4444',
+                  background:
+                    '#ef4444',
                   color: '#ffffff',
                   cursor: 'pointer',
                   width: '32px',
                   height: '32px',
                   display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
+                  alignItems:
+                    'center',
+                  justifyContent:
+                    'center',
                   borderRadius: '50%',
-                  transition: 'all 0.2s'
                 }}
                 title="Finish and Save"
               >
-                <Square size={11} fill="currentColor" />
+                <Square
+                  size={11}
+                  fill="currentColor"
+                />
               </button>
             </div>
-          ) : !message?.trim() && !selectedFile && (
-
-            <button type="button" onClick={localStartRecordingAction} style={{ border: 'none', background: 'transparent', color: '#64748b', cursor: 'pointer', width: '30px', height: '34px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '4px' }} title="Record audio note"><Mic size={16} /></button>
+          ) : (
+            !message?.trim() &&
+            (!selectedFiles ||
+              selectedFiles.length ===
+                0) && (
+              <button
+                type="button"
+                onClick={
+                  localStartRecordingAction
+                }
+                style={{
+                  border: 'none',
+                  background:
+                    'transparent',
+                  color: '#64748b',
+                  cursor: 'pointer',
+                  width: '30px',
+                  height: '34px',
+                  display: 'flex',
+                  alignItems:
+                    'center',
+                  justifyContent:
+                    'center',
+                  borderRadius: '4px',
+                }}
+                title="Record audio note"
+              >
+                <Mic size={16} />
+              </button>
+            )
           )}
         </div>
 
-        <div style={{ flex: 1, minWidth: 0, display: 'flex' }}>
-          {localRecording ? (
-            <div style={{
-              flex: 1,
-              height: '34px',
-              background: 'rgba(239, 68, 68, 0.02)',
-              border: '1px solid rgba(239, 68, 68, 0.08)',
-              borderRadius: '18px',
-              display: 'flex',
-              alignItems: 'center',
-              padding: '0 10px',
-              boxSizing: 'border-box',
-              gap: '10px',
-              width: '100%'
-            }}>
+        {/* ====================================================
+            RECORDING DISPLAY
+        ==================================================== */}
 
-              {/* 🎯 CONSOLIDATED TRACKER: Replaced 'REC' word with a flashing pulse dot paired directly with your timer */}
-              <div style={{
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: 'flex',
+          }}
+        >
+          {localRecording ? (
+            <div
+              style={{
+                flex: 1,
+                height: '34px',
+                background:
+                  'rgba(239, 68, 68, 0.02)',
+                border:
+                  '1px solid rgba(239, 68, 68, 0.08)',
+                borderRadius: '18px',
                 display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                flexShrink: 0,
-                background: '#f8fafc',
-                padding: '3px 8px',
-                borderRadius: '12px',
-                border: '1px solid #e2e8f0'
-              }}>
-                <div style={{
-                  width: '6px',
-                  height: '6px',
-                  borderRadius: '50%',
-                  background: '#ef4444',
-                  animation: isRecordPaused ? 'none' : 'recordingIndicatorFlash 0.6s infinite alternate'
-                }} />
-                <span style={{
-                  fontSize: '0.72rem',
-                  color: isRecordPaused ? '#64748b' : '#0f172a',
-                  fontWeight: 700,
-                  fontVariantNumeric: 'tabular-nums',
-                  whiteSpace: 'nowrap'
-                }}>
-                  {formatRecordingTime(localDuration)}
+                alignItems:
+                  'center',
+                padding: '0 8px',
+                boxSizing:
+                  'border-box',
+                gap: '8px',
+                width: '100%',
+              }}
+            >
+              {/* TIMER */}
+
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems:
+                    'center',
+                  gap: '6px',
+                  flexShrink: 0,
+                  background:
+                    '#f8fafc',
+                  padding:
+                    '3px 8px',
+                  borderRadius:
+                    '12px',
+                  border:
+                    '1px solid #e2e8f0',
+                }}
+              >
+                <div
+                  style={{
+                    width: '6px',
+                    height: '6px',
+                    borderRadius:
+                      '50%',
+                    background:
+                      '#ef4444',
+                    animation:
+                      isRecordPaused
+                        ? 'none'
+                        : 'recordingIndicatorFlash 0.6s infinite alternate',
+                  }}
+                />
+
+                <span
+                  style={{
+                    fontSize:
+                      '0.72rem',
+                    color:
+                      isRecordPaused
+                        ? '#64748b'
+                        : '#0f172a',
+                    fontWeight: 700,
+                    fontVariantNumeric:
+                      'tabular-nums',
+                    whiteSpace:
+                      'nowrap',
+                  }}
+                >
+                  {formatRecordingTime(
+                    localDuration
+                  )}
                 </span>
               </div>
 
-              {/* Max-width real-time audio fluctuating wave track lane */}
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '2px',
-                flex: 1,
-                justifyContent: 'center',
-                height: '32px',
-                minWidth: 0,
-                overflow: 'hidden',
-                padding: '0 2px'
-              }}>
-                {waveHeights.map((barHeight, i) => (
-                  <div
-                    key={i}
-                    className="live-mic-wave-bar"
-                    style={{
-                      height: `${isRecordPaused ? 8 : barHeight}px`,
-                      width: '2px', // Compact bar width footprint
-                      background: isRecordPaused ? '#cbd5e1' : '#ef4444',
-                      transition: isRecordPaused ? 'height 0.2s ease, background 0.2s' : 'height 0.05s ease',
-                      flexShrink: 0
-                    }}
-                  />
-                ))}
+              {/* =================================================
+                  LIVE REAL MICROPHONE WAVE
+              ================================================= */}
+
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems:
+                    'center',
+                  gap: '2px',
+                  flex: 1,
+                  justifyContent:
+                    'center',
+                  height: '32px',
+                  minWidth: 0,
+                  overflow:
+                    'hidden',
+                  padding:
+                    '0 4px',
+                }}
+              >
+                {waveHeights.map(
+                  (
+                    barHeight,
+                    index
+                  ) => (
+                    <div
+                      key={index}
+                      className="live-mic-wave-bar"
+                      style={{
+                        height: `${
+                          isRecordPaused
+                            ? 7
+                            : barHeight
+                        }px`,
+                        background:
+                          isRecordPaused
+                            ? '#cbd5e1'
+                            : '#ef4444',
+                      }}
+                    />
+                  )
+                )}
               </div>
 
-              {/* Compact Far-Right Trash Discard Option Button Trigger */}
+              {/* CANCEL */}
+
               <button
                 type="button"
-                onClick={localCancelRecordingAction}
+                onClick={
+                  localCancelRecordingAction
+                }
                 style={{
                   border: 'none',
-                  background: 'rgba(239, 68, 68, 0.06)',
+                  background:
+                    'rgba(239, 68, 68, 0.06)',
                   color: '#ef4444',
                   cursor: 'pointer',
                   width: '26px',
                   height: '26px',
                   display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
+                  alignItems:
+                    'center',
+                  justifyContent:
+                    'center',
                   borderRadius: '50%',
                   flexShrink: 0,
-                  transition: 'background 0.2s'
                 }}
                 title="Discard Recording"
-                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.12)'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.06)'}
               >
-                <X size={13} strokeWidth={2.5} />
+                <X
+                  size={13}
+                  strokeWidth={2.5}
+                />
               </button>
             </div>
           ) : (
             <textarea
-
-
-              value={message}
+              value={message || ''}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
               placeholder="Message"
               rows={1}
-              style={{ width: '100%', border: 'none', outline: 'none', resize: 'none', padding: '8px 0', fontSize: '0.9rem', color: '#0f172a', background: 'transparent', maxHeight: '100px', overflowY: 'auto' }}
+              style={{
+                width: '100%',
+                border: 'none',
+                outline: 'none',
+                resize: 'none',
+                padding: '8px 0',
+                fontSize: '0.9rem',
+                color: '#0f172a',
+                background:
+                  'transparent',
+                maxHeight: '100px',
+                overflowY: 'auto',
+              }}
               className="custom-input-scroll"
             />
           )}
         </div>
 
-        {!localRecording && (message?.trim() || selectedFile) && (
-          <button type="submit" style={{ border: 'none', background: '#2563eb', color: '#ffffff', width: '32px', height: '32px', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><ArrowUp size={18} strokeWidth={3} /></button>
-        )}
+        {/* SEND */}
+
+        {!localRecording &&
+          (message?.trim() ||
+            selectedFiles?.length >
+              0) && (
+            <button
+              type="submit"
+              style={{
+                border: 'none',
+                background: '#2563eb',
+                color: '#ffffff',
+                width: '32px',
+                height: '32px',
+                borderRadius: '50%',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems:
+                  'center',
+                justifyContent:
+                  'center',
+                flexShrink: 0,
+              }}
+            >
+              <ArrowUp
+                size={18}
+                strokeWidth={3}
+              />
+            </button>
+          )}
       </form>
     </div>
   );
 };
+

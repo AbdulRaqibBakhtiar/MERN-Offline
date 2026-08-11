@@ -1,48 +1,9 @@
-const express = require("express");
-const router = express.Router();
-const ChatMessage = require("../models/ChatMessage");
-const User = require("../models/Users");
-const Group = require("../models/Group");
-const mongoose = require("mongoose");
-const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
-
-// ============================================================
-// CHAT MEDIA UPLOAD STORAGE
-// ============================================================
-
-const chatUploadDir = path.join(__dirname, "..", "public", "uploads", "chat");
-
-if (!fs.existsSync(chatUploadDir)) {
-  fs.mkdirSync(chatUploadDir, { recursive: true });
-  console.log(`📁 Created chat upload directory: ${chatUploadDir}`);
-}
-
-const chatStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, chatUploadDir);
-  },
-
-  filename: (req, file, cb) => {
-    const extension = path.extname(file.originalname) || ".webm";
-
-    const safeExtension = extension
-      .toLowerCase()
-      .replace(/[^a-z0-9.]/g, "");
-
-    const uniqueName = `chat-${Date.now()}-${Math.round(Math.random() * 1e9)}${safeExtension}`;
-
-    cb(null, uniqueName);
-  }
-});
-
-const uploadChatMedia = multer({
-  storage: chatStorage,
-  limits: {
-    fileSize: 50 * 1024 * 1024
-  }
-});
+const express = require("express"); 
+const router = express.Router(); 
+const ChatMessage = require("../models/ChatMessage"); 
+const User = require('../models/Users'); // Imports your user schema 
+const Group = require('../models/Group'); // Imports your dynamic group schema 
+const mongoose = require('mongoose');
 
 // 🚀 1. Fetch real active personnel directory from database 
 router.get("/users", async (req, res) => { 
@@ -151,45 +112,5 @@ router.get('/conversations-summary', async (req, res) => {
     res.status(500).json({ error: "Failed to calculate active conversations overview." });
   }
 });
-// ============================================================
-// UPLOAD CHAT AUDIO / MEDIA
-// ============================================================
 
-router.post("/upload", uploadChatMedia.single("file"), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: "No file was uploaded."
-      });
-    }
-
-    const fileUrl = `/public/uploads/chat/${req.file.filename}`;
-
-    console.log("📤 Chat media uploaded:", {
-      originalName: req.file.originalname,
-      storedName: req.file.filename,
-      mimeType: req.file.mimetype,
-      size: req.file.size,
-      url: fileUrl
-    });
-
-    res.status(201).json({
-      success: true,
-      url: fileUrl,
-      filename: req.file.filename,
-      originalName: req.file.originalname,
-      mimeType: req.file.mimetype,
-      size: req.file.size
-    });
-
-  } catch (err) {
-    console.error("❌ Chat media upload failed:", err);
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to upload chat media."
-    });
-  }
-});
 module.exports = router;

@@ -91,14 +91,24 @@ export const MessageItem = ({ msg, idx, user, chatProps, resolveDrawerImgUrl }) 
         style={{
           maxWidth: "100%",
           padding: isCurrentlyEditing ? '12px 14px' : isMediaMsg ? '0px' : isVoiceMemoFile ? '10px 10px 4px 10px' : '8px 14px',
-          borderRadius: isMe ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
+          borderRadius: isMediaMsg
+            ? '8px'
+            : isMe
+              ? '12px 12px 2px 12px'
+              : '12px 12px 12px 2px',
           background: isCurrentlyEditing ? '#ffffff' : isMe ? 'linear-gradient(135deg, #2563eb, #1d4ed8)' : '#ffffff',
           color: isMe && !isCurrentlyEditing ? '#ffffff' : '#0f172a',
           fontSize: '0.88rem',
           boxShadow: isMediaMsg ? 'none' : isMe ? '0 2px 8px rgba(37,99,235,0.15)' : '0 1px 4px rgba(15,23,42,0.04)',
           position: 'relative',
           cursor: 'pointer',
-          width: isCurrentlyEditing ? '100%' : isMediaMsg ? '240px' : (isVoiceMemoFile || isDocMsg) ? '265px' : 'auto',
+          width: isCurrentlyEditing
+            ? '100%'
+            : isMediaMsg
+              ? '220px'
+              : (isVoiceMemoFile || isDocMsg)
+                ? '265px'
+                : 'auto',
           transition: 'all 0.15s ease',
           boxSizing: 'border-box'
         }}

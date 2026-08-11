@@ -1,14 +1,21 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import axios from 'axios';
-import { useChatMedia } from './useChatMedia';
-import { Trash2, X } from 'lucide-react';
 import React from 'react';
+import { useChatMedia } from './useChatMedia';
 import { useMessageReply } from './useMessageReply';
 
 const REACTION_OPTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
-const activeHostname = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-const BASE_URL = (activeHostname === 'localhost' || activeHostname === '127.0.0.1') ? 'http://localhost:5000' : `http://${activeHostname}:5000`;
+const activeHostname =
+  typeof window !== 'undefined'
+    ? window.location.hostname
+    : 'localhost';
+
+const BASE_URL =
+  activeHostname === 'localhost' ||
+    activeHostname === '127.0.0.1'
+    ? 'http://localhost:5000'
+    : `http://${activeHostname}:5000`;
 
 export const useLiveChat = (socket, user) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -18,11 +25,15 @@ export const useLiveChat = (socket, user) => {
   const [chatLog, setChatLog] = useState([]);
   const [typingUser, setTypingUser] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [selectedFile, setSelectedFile] = useState(null);
+  const [selectedFiles, setSelectedFiles] = useState([]);
   const [hoveredMessageId, setHoveredMessageId] = useState(null);
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [editInput, setEditInput] = useState('');
-  const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
+  const [toast, setToast] = useState({
+    show: false,
+    message: '',
+    type: 'info'
+  });
   const [activeUsersList, setActiveUsersList] = useState([]);
   const [reactionsMap, setReactionsMap] = useState({});
   const [chatChannels, setChatChannels] = useState([]);
@@ -31,7 +42,11 @@ export const useLiveChat = (socket, user) => {
   const [newGroupName, setNewGroupName] = useState('');
   const [selectedMembers, setSelectedMembers] = useState([]);
   const [activeAudioMemoId, setActivePlayingMemoId] = useState(null);
-  const [lightboxState, setLightboxState] = useState({ open: false, url: '', type: 'image' });
+  const [lightboxState, setLightboxState] = useState({
+    open: false,
+    url: '',
+    type: 'image'
+  });
   const [conversationsMetadata, setConversationsMetadata] = useState({});
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState(new Set());
@@ -42,438 +57,2358 @@ export const useLiveChat = (socket, user) => {
   const iceQueueRef = useRef([]);
 
   const replyProps = useMessageReply();
-  const { replyingMessage, setReplyingMessage, startReply, cancelReply } = replyProps;
 
-  const currentUsername = user?.username || user?.name || "Anonymous";
-  const currentUserId = String(user?._id || user?.id || "guest_user");
+  const {
+    replyingMessage,
+    setReplyingMessage,
+    startReply,
+    cancelReply
+  } = replyProps;
+
+  const currentUsername =
+    user?.username ||
+    user?.name ||
+    'Anonymous';
+
+  const currentUserId = String(
+    user?._id ||
+    user?.id ||
+    'guest_user'
+  );
 
   const triggerToast = useCallback((msg, type = 'info') => {
-    setToast({ show: true, message: msg, type });
+    setToast({
+      show: true,
+      message: msg,
+      type
+    });
+
     if (type !== 'error') {
-      setTimeout(() => setToast({ show: false, message: '', type: 'info' }), 3000);
+      setTimeout(() => {
+        setToast({
+          show: false,
+          message: '',
+          type: 'info'
+        });
+      }, 3000);
     }
   }, []);
 
-  const mediaProps = useChatMedia(socket, currentUsername, triggerToast);
-  const { setCallState, setCallType, setRemotePeerDetails, createPeerConnection, getOrCreatePeerConnection, clearCallSessionState, peerConnectionRef, endCallSession } = mediaProps;
+  const mediaProps = useChatMedia(
+    socket,
+    currentUsername,
+    triggerToast
+  );
+
+  /*
+   * IMPORTANT:
+   * callType was missing from this destructuring.
+   * receive_rtc_offer uses it to determine whether
+   * the peer connection should receive video.
+   */
+  const {
+    setCallState,
+    setCallType,
+    callType,
+    setRemotePeerDetails,
+    createPeerConnection,
+    getOrCreatePeerConnection,
+    clearCallSessionState,
+    peerConnectionRef,
+    endCallSession
+  } = mediaProps;
 
   useEffect(() => {
-    if (isOpen && typeof window !== 'undefined' && 'Notification' in window) {
-      if (Notification.permission !== 'granted' && Notification.permission !== 'denied') {
+    if (
+      isOpen &&
+      typeof window !== 'undefined' &&
+      'Notification' in window
+    ) {
+      if (
+        Notification.permission !== 'granted' &&
+        Notification.permission !== 'denied'
+      ) {
         Notification.requestPermission();
       }
     }
   }, [isOpen]);
+
   useEffect(() => {
     if (!isOpen) return;
+
     const fetchWorkspaceDirectory = async () => {
-      const activeToken = localStorage.getItem("token");
-      const configHeaders = { headers: { Authorization: activeToken ? `Bearer ${activeToken}` : "" } };
+      const activeToken = localStorage.getItem('token');
+
+      const configHeaders = {
+        headers: {
+          Authorization: activeToken
+            ? `Bearer ${activeToken}`
+            : ''
+        }
+      };
+
       try {
-        const usersRes = await axios.get(`${BASE_URL}/chat/users`, configHeaders);
-        const dbUsers = Array.isArray(usersRes.data) ? usersRes.data : [];
-        setPersonalContacts(dbUsers.filter(u => String(u._id) !== currentUserId).map(u => ({ id: u._id, name: u.firstName && u.lastName ? `${u.firstName} ${u.lastName}` : u.username, desc: u.email, avatar: u.profileImage || u.avatar || null, type: 'peer' })));
+        const usersRes = await axios.get(
+          `${BASE_URL}/chat/users`,
+          configHeaders
+        );
+
+        const dbUsers = Array.isArray(usersRes.data)
+          ? usersRes.data
+          : [];
+
+        setPersonalContacts(
+          dbUsers
+            .filter(
+              u => String(u._id) !== currentUserId
+            )
+            .map(u => ({
+              id: u._id,
+              name:
+                u.firstName && u.lastName
+                  ? `${u.firstName} ${u.lastName}`
+                  : u.username,
+              desc: u.email,
+              avatar:
+                u.profileImage ||
+                u.avatar ||
+                null,
+              type: 'peer'
+            }))
+        );
       } catch (err) {
         console.error(err);
         setPersonalContacts([]);
       }
+
       try {
-        const groupsRes = await axios.get(`${BASE_URL}/chat/groups`, configHeaders);
-        setChatChannels(Array.isArray(groupsRes.data) ? groupsRes.data : []);
+        const groupsRes = await axios.get(
+          `${BASE_URL}/chat/groups`,
+          configHeaders
+        );
+
+        setChatChannels(
+          Array.isArray(groupsRes.data)
+            ? groupsRes.data
+            : []
+        );
       } catch (err) {
         console.error(err);
         setChatChannels([]);
       }
     };
+
     fetchWorkspaceDirectory();
   }, [isOpen, currentUserId]);
 
   useEffect(() => {
     if (!socket || !user) return;
-    const initialRoom = currentRoom?.id || currentRoom?._id || "global_workspace";
-    const join = { room: initialRoom, username: currentUsername, userId: currentUserId, profileImage: user?.profileImage || null };
-    if (socket.connected) socket.emit("join_room", join);
-    socket.on("connect", () => socket.emit("join_room", join));
-    return () => socket.off("connect");
-  }, [socket, user, currentUsername, currentUserId, currentRoom]);
+
+    const initialRoom =
+      currentRoom?.id ||
+      currentRoom?._id ||
+      'global_workspace';
+
+    const join = {
+      room: initialRoom,
+      username: currentUsername,
+      userId: currentUserId,
+      profileImage: user?.profileImage || null
+    };
+
+    const joinRoom = () => {
+      socket.emit('join_room', join);
+    };
+
+    if (socket.connected) {
+      joinRoom();
+    }
+
+    socket.on('connect', joinRoom);
+
+    return () => {
+      socket.off('connect', joinRoom);
+    };
+  }, [
+    socket,
+    user,
+    currentUsername,
+    currentUserId,
+    currentRoom
+  ]);
 
   useEffect(() => {
-    if (!isOpen || currentUserId === "guest_user") return;
+    if (
+      !isOpen ||
+      currentUserId === 'guest_user'
+    ) {
+      return;
+    }
+
     const loadConversationsSummary = async () => {
       try {
-        const activeToken = localStorage.getItem("token");
-        const res = await axios.get(`${BASE_URL}/chat/conversations-summary?userId=${currentUserId}`, { headers: { Authorization: activeToken ? `Bearer ${activeToken}` : "" } });
-        setConversationsMetadata(prev => ({ ...prev, ...res.data }));
+        const activeToken =
+          localStorage.getItem('token');
+
+        const res = await axios.get(
+          `${BASE_URL}/chat/conversations-summary?userId=${currentUserId}`,
+          {
+            headers: {
+              Authorization: activeToken
+                ? `Bearer ${activeToken}`
+                : ''
+            }
+          }
+        );
+
+        setConversationsMetadata(prev => ({
+          ...prev,
+          ...res.data
+        }));
       } catch (err) {
-        console.error("❌ messenger histories fail:", err);
+        console.error(
+          '❌ messenger histories fail:',
+          err
+        );
       }
     };
+
     loadConversationsSummary();
   }, [isOpen, currentUserId]);
 
   useEffect(() => {
-    if (!isOpen || activeView !== 'chat' || !currentRoom) return;
+    if (
+      !isOpen ||
+      activeView !== 'chat' ||
+      !currentRoom
+    ) {
+      return;
+    }
+
     let isMounted = true;
+
     const loadChatHistory = async () => {
       try {
-        const activeToken = localStorage.getItem("token");
-        const roomId = currentRoom.id || currentRoom._id;
-        const res = await axios.get(`${BASE_URL}/chat/history/${roomId}`, { headers: { Authorization: activeToken ? `Bearer ${activeToken}` : "" } });
+        const activeToken =
+          localStorage.getItem('token');
+
+        const roomId =
+          currentRoom.id ||
+          currentRoom._id;
+
+        const res = await axios.get(
+          `${BASE_URL}/chat/history/${roomId}`,
+          {
+            headers: {
+              Authorization: activeToken
+                ? `Bearer ${activeToken}`
+                : ''
+            }
+          }
+        );
+
         if (!isMounted) return;
-        const raw = Array.isArray(res.data) ? res.data : [];
+
+        const raw = Array.isArray(res.data)
+          ? res.data
+          : [];
+
         const uniqueMessages = [];
         const seenIds = new Set();
+
         raw.forEach(m => {
           if (!seenIds.has(m._id)) {
             seenIds.add(m._id);
-            uniqueMessages.push({ ...m, readBy: Array.isArray(m.readBy) ? m.readBy : [], deliveredTo: Array.isArray(m.deliveredTo) ? m.deliveredTo : [] });
+
+            uniqueMessages.push({
+              ...m,
+              readBy: Array.isArray(m.readBy)
+                ? m.readBy
+                : [],
+              deliveredTo: Array.isArray(
+                m.deliveredTo
+              )
+                ? m.deliveredTo
+                : []
+            });
           }
         });
+
         setChatLog(uniqueMessages);
-        if (socket && currentUserId !== "guest_user") {
+
+        if (
+          socket &&
+          currentUserId !== 'guest_user'
+        ) {
           uniqueMessages.forEach(m => {
-            const isMine = String(m.senderId || m.senderName) === currentUserId || m.senderName === currentUsername;
-            if (!isMine && !m.readBy.some(r => String(r?.userId || r) === currentUserId)) {
-              socket.emit("mark_as_read", { messageId: m._id, userId: currentUserId, room: roomId });
+            const isMine =
+              String(
+                m.senderId ||
+                m.senderName
+              ) === currentUserId ||
+              m.senderName ===
+              currentUsername;
+
+            if (
+              !isMine &&
+              !m.readBy.some(
+                r =>
+                  String(
+                    r?.userId || r
+                  ) === currentUserId
+              )
+            ) {
+              socket.emit(
+                'mark_as_read',
+                {
+                  messageId: m._id,
+                  userId: currentUserId,
+                  room: roomId
+                }
+              );
             }
           });
         }
       } catch (err) {
         console.error(err);
-        if (isMounted) setChatLog([]);
-      }
-    };
-    loadChatHistory();
-    return () => { isMounted = false; };
-  }, [isOpen, activeView, currentRoom]);
 
-  useEffect(() => {
-    if (isOpen) setTimeout(() => messageEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-  }, [chatLog, isOpen, typingUser]);
-  useEffect(() => {
-    if (!socket) return;
-    socket.off("receive_message");
-    socket.off("messages_bulk_deleted");
-    socket.off("conversation_history_cleared");
-    socket.on("group_channel_added", (newChannel) => setChatChannels(prev => [...prev, newChannel]));
-    socket.on("receive_message", (m) => {
-      const roomId = currentRoom?.id || currentRoom?._id || "global_workspace";
-      const messageRoomId = m.room || roomId;
-      const isCurrentlyViewingThisRoom = currentRoom && (String(currentRoom.id) === String(messageRoomId) || String(currentRoom._id) === String(messageRoomId));
-      const isMine = String(m.senderId || m.senderName) === currentUserId || m.senderName === currentUsername;
-      const isBrowserTabBlurred = typeof document !== 'undefined' && document.hidden;
-
-      if (!isMine && (!isOpen || !isCurrentlyViewingThisRoom || isBrowserTabBlurred)) {
-        try {
-          const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-          const oscillator = audioCtx.createOscillator();
-          const gainNode = audioCtx.createGain();
-          oscillator.type = 'sine';
-          oscillator.frequency.setValueAtTime(523.25, audioCtx.currentTime);
-          oscillator.frequency.setValueAtTime(783.99, audioCtx.currentTime + 0.07);
-          gainNode.gain.setValueAtTime(0.12, audioCtx.currentTime);
-          gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.25);
-          oscillator.connect(gainNode); gainNode.connect(audioCtx.destination);
-          oscillator.start(); oscillator.stop(audioCtx.currentTime + 0.25);
-        } catch (err) { console.warn(err); }
-
-        if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-          const summaryText = m.type === 'text' ? m.message : m.type === 'image' ? '📷 Sent an image' : m.type === 'audio' ? '🎵 Sent a voice note' : '📎 Sent an attachment';
-          const desktopNotification = new Notification(`New Message from ${m.senderName}`, { body: summaryText, icon: m.senderAvatar || '/favicon.ico', tag: messageRoomId, renotify: true });
-          desktopNotification.onclick = function (e) { e.preventDefault(); window.focus(); setIsOpen?.(true); navigateToRoom({ id: m.room, roomId: m.room, name: m.senderName, type: m.room.includes('_') ? 'peer' : 'group', avatar: m.senderAvatar }); desktopNotification.close(); };
+        if (isMounted) {
+          setChatLog([]);
         }
       }
-      if (isCurrentlyViewingThisRoom) {
-        setChatLog(prev => { if (prev.some(x => x._id === m._id)) return prev; return [...prev, { ...m, readBy: Array.isArray(m.readBy) ? m.readBy : [], deliveredTo: Array.isArray(m.deliveredTo) ? m.deliveredTo : [] }]; });
-        if (!isMine) socket.emit("mark_as_read", { messageId: m._id, userId: currentUserId, room: roomId });
-      }
-      setConversationsMetadata(prev => { const currentMeta = prev[messageRoomId] || { unreadCount: 0 }; return { ...prev, [messageRoomId]: { lastMessage: m.message || (m.type === 'image' ? '📷 Image' : '📎 Attachment'), timestamp: m.createdAt || new Date(), unreadCount: (!isMine && !isCurrentlyViewingThisRoom) ? (currentMeta.unreadCount + 1) : currentMeta.unreadCount } }; });
-    });
+    };
 
-    socket.on("user_typing", ({ username, isTyping }) => setTypingUser(isTyping ? username : ''));
-    socket.on("message_read_update", ({ messageId, readBy }) => setChatLog(prev => prev.map(m => m._id === messageId ? { ...m, readBy } : m)));
-    socket.on("message_delivered_update", ({ messageId, deliveredTo }) => setChatLog(prev => prev.map(m => m._id === messageId ? { ...m, deliveredTo } : m)));
-    socket.on("message_edited", ({ messageId, newMessage }) => { setChatLog(prev => prev.map(m => m._id === messageId ? { ...m, message: newMessage } : m)); triggerToast("Message updated successfully", "success"); });
-    socket.on("message_deleted", ({ messageId }) => { setChatLog(prev => prev.filter(m => m._id !== messageId)); triggerToast("Message deleted successfully", "success"); });
-    socket.on("room_users_update", (users) => setActiveUsersList(users || []));
-    socket.on("message_reaction_update", ({ messageId, emoji, username }) => {
-      setReactionsMap(prev => { const curr = prev[messageId] || [], idx = curr.findIndex(r => r.username === username); let updated = [...curr]; if (idx > -1) { if (updated[idx].emoji === emoji) updated = updated.filter(r => r.username !== username); else updated[idx].emoji = emoji; } else { updated.push({ emoji, username }); } return { ...prev, [messageId]: updated }; });
-      setChatLog(prev => prev.map(m => { if (m._id !== messageId) return m; let arr = Array.isArray(m.reactions) ? [...m.reactions] : []; const i = arr.findIndex(r => r.username === username); if (i > -1) { if (arr[i].emoji === emoji) arr = arr.filter(r => r.username !== username); else arr[i] = { ...arr[i], emoji, createdAt: new Date() }; } else { arr.push({ emoji, username, createdAt: new Date() }); } return { ...m, reactions: arr }; }));
-    });
-    socket.on("messages_bulk_deleted", ({ room, messageIds }) => { if (currentRoom && (currentRoom.id === room || currentRoom._id === room)) { setChatLog(prev => prev.filter(m => !messageIds.includes(m._id))); } setIsSelectionMode(false); setSelectedMessageIds(new Set()); triggerToast(`${messageIds.length} messages removed permanently`, "success"); });
-    socket.on("conversation_history_cleared", ({ room }) => { if (currentRoom && (currentRoom.id === room || currentRoom._id === room)) setChatLog([]); setConversationsMetadata(prev => { const next = { ...prev }; delete next[room]; return next; }); triggerToast("Conversation history cleared successfully", "success"); });
+    loadChatHistory();
 
-    const handleIncomingCall = (payload) => { setIsOpen(true); setActiveView('chat'); setCallType(payload.type || 'video'); setCallState('incoming'); setRemotePeerDetails({ socketId: payload.fromSocketId, name: payload.callerName || "Support Colleague", room: payload.room }); };
-    socket.on("incoming_call_signal", handleIncomingCall); socket.on("initiate_call_signal", handleIncomingCall);
-    socket.on("call_accepted_by_peer", ({ peerSocketId }) => { setRemotePeerDetails(prev => ({ ...prev, socketId: peerSocketId })); createPeerConnection(peerSocketId); });
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    isOpen,
+    activeView,
+    currentRoom,
+    socket,
+    currentUserId,
+    currentUsername
+  ]);
 
-    socket.on("receive_rtc_offer", async ({ fromSocketId, offer }) => { try { const pc = getOrCreatePeerConnection(fromSocketId); await pc.setRemoteDescription(new RTCSessionDescription(offer)); const answer = await pc.createAnswer(); await pc.setLocalDescription(answer); socket.emit("send_rtc_answer", { toSocketId: fromSocketId, answer }); while (iceQueueRef.current.length > 0) { await pc.addIceCandidate(new RTCIceCandidate(iceQueueRef.current.shift())).catch(e => console.error(e)); } } catch (err) { endCallSession(); } });
-    socket.on("receive_rtc_answer", async ({ answer }) => { try { if (peerConnectionRef.current) { await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(answer)); while (iceQueueRef.current.length > 0) { await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(iceQueueRef.current.shift())).catch(e => console.error(e)); } } } catch (err) { endCallSession(); } });
-    socket.on("receive_ice_candidate", async ({ candidate }) => { if (candidate) { const pc = peerConnectionRef.current; if (pc && pc.remoteDescription && pc.remoteDescription.type) { try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) { } } else { iceQueueRef.current.push(candidate); } } });
-
-    const handleCallTermination = () => { iceQueueRef.current = []; clearCallSessionState(); };
-    socket.on("call_terminated_by_peer", handleCallTermination); socket.on("end_call_session", handleCallTermination);
-    return () => { socket.off("receive_message"); socket.off("messages_bulk_deleted"); socket.off("conversation_history_cleared"); socket.off("incoming_call_signal"); socket.off("initiate_call_signal"); socket.off("call_accepted_by_peer"); socket.off("receive_rtc_offer"); socket.off("receive_rtc_answer"); socket.off("receive_ice_candidate"); socket.off("call_terminated_by_peer"); socket.off("end_call_session"); };
-  }, [socket, isOpen, currentUserId, currentUsername, currentRoom]);
-  const navigateToRoom = (roomItem) => {
-    let targetRoom = { ...roomItem }, targetRoomId = roomItem.roomId || roomItem.id;
-    if (roomItem.type === 'peer') {
-      const jointRoomId = [String(currentUserId), String(roomItem.id)].sort().join('_');
-      targetRoom = { id: jointRoomId, _id: jointRoomId, name: roomItem.name, type: 'dm', peerId: roomItem.id, avatar: roomItem.avatar || roomItem.profileImage || null };
-      targetRoomId = jointRoomId;
-    } else {
-      targetRoom = { id: targetRoomId, _id: targetRoomId, name: roomItem.name, type: 'group', avatar: roomItem.avatar || roomItem.profileImage || null };
+  useEffect(() => {
+    if (isOpen) {
+      setTimeout(() => {
+        messageEndRef.current?.scrollIntoView({
+          behavior: 'smooth'
+        });
+      }, 100);
     }
-    setConversationsMetadata(prev => ({ ...prev, [targetRoomId]: { ...(prev[targetRoomId] || {}), unreadCount: 0 } }));
-    setActiveView('chat'); setCurrentRoom(targetRoom); setChatLog([]); setIsSelectionMode(false); setSelectedMessageIds(new Set());
-    if (socket && targetRoomId) { socket.emit("join_room", { room: targetRoomId, username: currentUsername, userId: currentUserId }); }
-  };
+  }, [chatLog, isOpen, typingUser]);
 
-  const triggerCreateGroup = async (e) => {
-    e.preventDefault(); if (!newGroupName.trim()) return;
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleGroupChannelAdded = newChannel => {
+      setChatChannels(prev => [
+        ...prev,
+        newChannel
+      ]);
+    };
+
+    const handleReceiveMessage = m => {
+      const roomId =
+        currentRoom?.id ||
+        currentRoom?._id ||
+        'global_workspace';
+
+      const messageRoomId =
+        m.room || roomId;
+
+      const isCurrentlyViewingThisRoom =
+        currentRoom &&
+        (
+          String(currentRoom.id) ===
+          String(messageRoomId) ||
+          String(currentRoom._id) ===
+          String(messageRoomId)
+        );
+
+      const isMine =
+        String(
+          m.senderId ||
+          m.senderName
+        ) === currentUserId ||
+        m.senderName ===
+        currentUsername;
+
+      const isBrowserTabBlurred =
+        typeof document !== 'undefined' &&
+        document.hidden;
+
+      if (
+        !isMine &&
+        (
+          !isOpen ||
+          !isCurrentlyViewingThisRoom ||
+          isBrowserTabBlurred
+        )
+      ) {
+        try {
+          const AudioContext =
+            window.AudioContext ||
+            window.webkitAudioContext;
+
+          const audioCtx =
+            new AudioContext();
+
+          const oscillator =
+            audioCtx.createOscillator();
+
+          const gainNode =
+            audioCtx.createGain();
+
+          oscillator.type = 'sine';
+
+          oscillator.frequency.setValueAtTime(
+            523.25,
+            audioCtx.currentTime
+          );
+
+          oscillator.frequency.setValueAtTime(
+            783.99,
+            audioCtx.currentTime + 0.07
+          );
+
+          gainNode.gain.setValueAtTime(
+            0.12,
+            audioCtx.currentTime
+          );
+
+          gainNode.gain.exponentialRampToValueAtTime(
+            0.0001,
+            audioCtx.currentTime + 0.25
+          );
+
+          oscillator.connect(gainNode);
+          gainNode.connect(audioCtx.destination);
+
+          oscillator.start();
+          oscillator.stop(
+            audioCtx.currentTime + 0.25
+          );
+        } catch (err) {
+          console.warn(err);
+        }
+
+        if (
+          typeof window !== 'undefined' &&
+          'Notification' in window &&
+          Notification.permission === 'granted'
+        ) {
+          const summaryText =
+            m.type === 'text'
+              ? m.message
+              : m.type === 'image'
+                ? '📷 Sent an image'
+                : m.type === 'audio'
+                  ? '🎵 Sent a voice note'
+                  : '📎 Sent an attachment';
+
+          const desktopNotification =
+            new Notification(
+              `New Message from ${m.senderName}`,
+              {
+                body: summaryText,
+                icon:
+                  m.senderAvatar ||
+                  '/favicon.ico',
+                tag: messageRoomId,
+                renotify: true
+              }
+            );
+
+          desktopNotification.onclick =
+            e => {
+              e.preventDefault();
+
+              window.focus();
+              setIsOpen(true);
+
+              navigateToRoom({
+                id: m.room,
+                roomId: m.room,
+                name: m.senderName,
+                type:
+                  m.room &&
+                    m.room.includes('_')
+                    ? 'peer'
+                    : 'group',
+                avatar:
+                  m.senderAvatar
+              });
+
+              desktopNotification.close();
+            };
+        }
+      }
+
+      if (isCurrentlyViewingThisRoom) {
+        setChatLog(prev => {
+          if (
+            prev.some(
+              x => x._id === m._id
+            )
+          ) {
+            return prev;
+          }
+
+          return [
+            ...prev,
+            {
+              ...m,
+              readBy: Array.isArray(
+                m.readBy
+              )
+                ? m.readBy
+                : [],
+              deliveredTo:
+                Array.isArray(
+                  m.deliveredTo
+                )
+                  ? m.deliveredTo
+                  : []
+            }
+          ];
+        });
+
+        if (!isMine) {
+          socket.emit(
+            'mark_as_read',
+            {
+              messageId: m._id,
+              userId: currentUserId,
+              room: roomId
+            }
+          );
+        }
+      }
+
+      setConversationsMetadata(
+        prev => {
+          const currentMeta =
+            prev[messageRoomId] || {
+              unreadCount: 0
+            };
+
+          return {
+            ...prev,
+            [messageRoomId]: {
+              lastMessage:
+                m.message ||
+                (
+                  m.type === 'image'
+                    ? '📷 Image'
+                    : '📎 Attachment'
+                ),
+              timestamp:
+                m.createdAt ||
+                new Date(),
+              unreadCount:
+                !isMine &&
+                  !isCurrentlyViewingThisRoom
+                  ? currentMeta.unreadCount + 1
+                  : currentMeta.unreadCount
+            }
+          };
+        }
+      );
+    };
+
+    const handleUserTyping = ({
+      username,
+      isTyping
+    }) => {
+      setTypingUser(
+        isTyping ? username : ''
+      );
+    };
+
+    const handleMessageReadUpdate = ({
+      messageId,
+      readBy
+    }) => {
+      setChatLog(prev =>
+        prev.map(m =>
+          m._id === messageId
+            ? { ...m, readBy }
+            : m
+        )
+      );
+    };
+
+    const handleMessageDeliveredUpdate = ({
+      messageId,
+      deliveredTo
+    }) => {
+      setChatLog(prev =>
+        prev.map(m =>
+          m._id === messageId
+            ? { ...m, deliveredTo }
+            : m
+        )
+      );
+    };
+
+    const handleMessageEdited = ({
+      messageId,
+      newMessage
+    }) => {
+      setChatLog(prev =>
+        prev.map(m =>
+          m._id === messageId
+            ? {
+              ...m,
+              message: newMessage
+            }
+            : m
+        )
+      );
+
+      triggerToast(
+        'Message updated successfully',
+        'success'
+      );
+    };
+
+    const handleMessageDeleted = ({
+      messageId
+    }) => {
+      setChatLog(prev =>
+        prev.filter(
+          m => m._id !== messageId
+        )
+      );
+
+      triggerToast(
+        'Message deleted successfully',
+        'success'
+      );
+    };
+
+    const handleRoomUsersUpdate = users => {
+      setActiveUsersList(users || []);
+    };
+
+    const handleReactionUpdate = ({
+      messageId,
+      emoji,
+      username
+    }) => {
+      setReactionsMap(prev => {
+        const curr =
+          prev[messageId] || [];
+
+        const idx = curr.findIndex(
+          r => r.username === username
+        );
+
+        let updated = [...curr];
+
+        if (idx > -1) {
+          if (
+            updated[idx].emoji === emoji
+          ) {
+            updated =
+              updated.filter(
+                r =>
+                  r.username !==
+                  username
+              );
+          } else {
+            updated[idx] = {
+              ...updated[idx],
+              emoji
+            };
+          }
+        } else {
+          updated.push({
+            emoji,
+            username
+          });
+        }
+
+        return {
+          ...prev,
+          [messageId]: updated
+        };
+      });
+
+      setChatLog(prev =>
+        prev.map(m => {
+          if (m._id !== messageId) {
+            return m;
+          }
+
+          let arr =
+            Array.isArray(m.reactions)
+              ? [...m.reactions]
+              : [];
+
+          const i = arr.findIndex(
+            r =>
+              r.username ===
+              username
+          );
+
+          if (i > -1) {
+            if (
+              arr[i].emoji === emoji
+            ) {
+              arr = arr.filter(
+                r =>
+                  r.username !==
+                  username
+              );
+            } else {
+              arr[i] = {
+                ...arr[i],
+                emoji,
+                createdAt: new Date()
+              };
+            }
+          } else {
+            arr.push({
+              emoji,
+              username,
+              createdAt: new Date()
+            });
+          }
+
+          return {
+            ...m,
+            reactions: arr
+          };
+        })
+      );
+    };
+
+    const handleBulkDeleted = ({
+      room,
+      messageIds
+    }) => {
+      if (
+        currentRoom &&
+        (
+          currentRoom.id === room ||
+          currentRoom._id === room
+        )
+      ) {
+        setChatLog(prev =>
+          prev.filter(
+            m =>
+              !messageIds.includes(
+                m._id
+              )
+          )
+        );
+      }
+
+      setIsSelectionMode(false);
+      setSelectedMessageIds(
+        new Set()
+      );
+
+      triggerToast(
+        `${messageIds.length} messages removed permanently`,
+        'success'
+      );
+    };
+
+    const handleConversationHistoryCleared = ({
+      room
+    }) => {
+      if (
+        currentRoom &&
+        (
+          currentRoom.id === room ||
+          currentRoom._id === room
+        )
+      ) {
+        setChatLog([]);
+      }
+
+      setConversationsMetadata(
+        prev => {
+          const next = {
+            ...prev
+          };
+
+          delete next[room];
+
+          return next;
+        }
+      );
+
+      triggerToast(
+        'Conversation history cleared successfully',
+        'success'
+      );
+    };
+
+    /*
+     * CALL SIGNALING
+     */
+    const handleIncomingCall = payload => {
+      setIsOpen(true);
+      setActiveView('chat');
+
+      setCallType(
+        payload.type || 'video'
+      );
+
+      setCallState('incoming');
+
+      setRemotePeerDetails({
+        socketId:
+          payload.fromSocketId,
+        name:
+          payload.callerName ||
+          'Support Colleague',
+        room: payload.room
+      });
+    };
+
+    const handleCallAccepted = ({
+      peerSocketId
+    }) => {
+      setRemotePeerDetails(prev => ({
+        ...prev,
+        socketId: peerSocketId
+      }));
+
+      createPeerConnection(
+        peerSocketId
+      );
+    };
+
+    /*
+     * WEBRTC OFFER
+     *
+     * FIX:
+     * callType now comes directly from mediaProps.
+     */
+    const handleReceiveRtcOffer = async ({
+      fromSocketId,
+      offer
+    }) => {
+      try {
+        console.log(
+          '[WebRTC] RECEIVED OFFER',
+          offer
+        );
+
+        const pc =
+          getOrCreatePeerConnection(
+            fromSocketId
+          );
+
+        await pc.setRemoteDescription(
+          new RTCSessionDescription(
+            offer
+          )
+        );
+
+        console.log(
+          '[WebRTC] Remote description set'
+        );
+
+        const answer =
+          await pc.createAnswer({
+            offerToReceiveAudio: true,
+            offerToReceiveVideo:
+              callType === 'video'
+          });
+
+        await pc.setLocalDescription(
+          answer
+        );
+
+        socket.emit(
+          'send_rtc_answer',
+          {
+            toSocketId:
+              fromSocketId,
+            answer:
+              pc.localDescription
+          }
+        );
+
+        console.log(
+          '[WebRTC] ANSWER SENT'
+        );
+
+        while (
+          iceQueueRef.current.length >
+          0
+        ) {
+          const candidate =
+            iceQueueRef.current.shift();
+
+          try {
+            await pc.addIceCandidate(
+              new RTCIceCandidate(
+                candidate
+              )
+            );
+          } catch (err) {
+            console.warn(
+              '[WebRTC] Queued ICE failed:',
+              err
+            );
+          }
+        }
+      } catch (err) {
+        console.error(
+          '[WebRTC] Offer handling failed:',
+          err
+        );
+
+        endCallSession();
+      }
+    };
+
+    /*
+     * WEBRTC ANSWER
+     */
+    const handleReceiveRtcAnswer =
+      async ({ answer }) => {
+        try {
+          const pc =
+            peerConnectionRef.current;
+
+          if (!pc) {
+            console.warn(
+              '[WebRTC] Answer received but no peer connection exists'
+            );
+
+            return;
+          }
+
+          console.log(
+            '[WebRTC] RECEIVED ANSWER'
+          );
+
+          await pc.setRemoteDescription(
+            new RTCSessionDescription(
+              answer
+            )
+          );
+
+          console.log(
+            '[WebRTC] Caller remote description set'
+          );
+
+          while (
+            iceQueueRef.current.length >
+            0
+          ) {
+            const candidate =
+              iceQueueRef.current.shift();
+
+            try {
+              await pc.addIceCandidate(
+                new RTCIceCandidate(
+                  candidate
+                )
+              );
+            } catch (err) {
+              console.warn(
+                '[WebRTC] Queued ICE failed:',
+                err
+              );
+            }
+          }
+        } catch (err) {
+          console.error(
+            '[WebRTC] Answer handling failed:',
+            err
+          );
+
+          endCallSession();
+        }
+      };
+
+    /*
+     * ICE CANDIDATES
+     */
+    const handleReceiveIceCandidate =
+      async ({ candidate }) => {
+        if (!candidate) return;
+
+        const pc =
+          peerConnectionRef.current;
+
+        if (
+          pc &&
+          pc.remoteDescription &&
+          pc.remoteDescription.type
+        ) {
+          try {
+            await pc.addIceCandidate(
+              new RTCIceCandidate(
+                candidate
+              )
+            );
+          } catch (err) {
+            console.warn(
+              '[WebRTC] ICE candidate failed:',
+              err
+            );
+          }
+        } else {
+          iceQueueRef.current.push(
+            candidate
+          );
+        }
+      };
+
+    const handleCallTermination = () => {
+      iceQueueRef.current = [];
+      clearCallSessionState();
+    };
+
+    socket.on(
+      'group_channel_added',
+      handleGroupChannelAdded
+    );
+
+    socket.on(
+      'receive_message',
+      handleReceiveMessage
+    );
+
+    socket.on(
+      'user_typing',
+      handleUserTyping
+    );
+
+    socket.on(
+      'message_read_update',
+      handleMessageReadUpdate
+    );
+
+    socket.on(
+      'message_delivered_update',
+      handleMessageDeliveredUpdate
+    );
+
+    socket.on(
+      'message_edited',
+      handleMessageEdited
+    );
+
+    socket.on(
+      'message_deleted',
+      handleMessageDeleted
+    );
+
+    socket.on(
+      'room_users_update',
+      handleRoomUsersUpdate
+    );
+
+    socket.on(
+      'message_reaction_update',
+      handleReactionUpdate
+    );
+
+    socket.on(
+      'messages_bulk_deleted',
+      handleBulkDeleted
+    );
+
+    socket.on(
+      'conversation_history_cleared',
+      handleConversationHistoryCleared
+    );
+
+    socket.on(
+      'incoming_call_signal',
+      handleIncomingCall
+    );
+
+    socket.on(
+      'initiate_call_signal',
+      handleIncomingCall
+    );
+
+    socket.on(
+      'call_accepted_by_peer',
+      handleCallAccepted
+    );
+
+    socket.on(
+      'receive_rtc_offer',
+      handleReceiveRtcOffer
+    );
+
+    socket.on(
+      'receive_rtc_answer',
+      handleReceiveRtcAnswer
+    );
+
+    socket.on(
+      'receive_ice_candidate',
+      handleReceiveIceCandidate
+    );
+
+    socket.on(
+      'call_terminated_by_peer',
+      handleCallTermination
+    );
+
+    socket.on(
+      'end_call_session',
+      handleCallTermination
+    );
+
+    return () => {
+      socket.off(
+        'group_channel_added',
+        handleGroupChannelAdded
+      );
+
+      socket.off(
+        'receive_message',
+        handleReceiveMessage
+      );
+
+      socket.off(
+        'user_typing',
+        handleUserTyping
+      );
+
+      socket.off(
+        'message_read_update',
+        handleMessageReadUpdate
+      );
+
+      socket.off(
+        'message_delivered_update',
+        handleMessageDeliveredUpdate
+      );
+
+      socket.off(
+        'message_edited',
+        handleMessageEdited
+      );
+
+      socket.off(
+        'message_deleted',
+        handleMessageDeleted
+      );
+
+      socket.off(
+        'room_users_update',
+        handleRoomUsersUpdate
+      );
+
+      socket.off(
+        'message_reaction_update',
+        handleReactionUpdate
+      );
+
+      socket.off(
+        'messages_bulk_deleted',
+        handleBulkDeleted
+      );
+
+      socket.off(
+        'conversation_history_cleared',
+        handleConversationHistoryCleared
+      );
+
+      socket.off(
+        'incoming_call_signal',
+        handleIncomingCall
+      );
+
+      socket.off(
+        'initiate_call_signal',
+        handleIncomingCall
+      );
+
+      socket.off(
+        'call_accepted_by_peer',
+        handleCallAccepted
+      );
+
+      socket.off(
+        'receive_rtc_offer',
+        handleReceiveRtcOffer
+      );
+
+      socket.off(
+        'receive_rtc_answer',
+        handleReceiveRtcAnswer
+      );
+
+      socket.off(
+        'receive_ice_candidate',
+        handleReceiveIceCandidate
+      );
+
+      socket.off(
+        'call_terminated_by_peer',
+        handleCallTermination
+      );
+
+      socket.off(
+        'end_call_session',
+        handleCallTermination
+      );
+    };
+  }, [
+    socket,
+    isOpen,
+    currentUserId,
+    currentUsername,
+    currentRoom,
+    callType,
+    setCallState,
+    setCallType,
+    setRemotePeerDetails,
+    createPeerConnection,
+    getOrCreatePeerConnection,
+    clearCallSessionState,
+    peerConnectionRef,
+    endCallSession,
+    triggerToast
+  ]);
+
+  const navigateToRoom = useCallback(
+    roomItem => {
+      let targetRoom = {
+        ...roomItem
+      };
+
+      let targetRoomId =
+        roomItem.roomId ||
+        roomItem.id;
+
+      if (roomItem.type === 'peer') {
+        const jointRoomId = [
+          String(currentUserId),
+          String(roomItem.id)
+        ]
+          .sort()
+          .join('_');
+
+        targetRoom = {
+          id: jointRoomId,
+          _id: jointRoomId,
+          name: roomItem.name,
+          type: 'dm',
+          peerId: roomItem.id,
+          avatar:
+            roomItem.avatar ||
+            roomItem.profileImage ||
+            null
+        };
+
+        targetRoomId =
+          jointRoomId;
+      } else {
+        targetRoom = {
+          id: targetRoomId,
+          _id: targetRoomId,
+          name: roomItem.name,
+          type: 'group',
+          avatar:
+            roomItem.avatar ||
+            roomItem.profileImage ||
+            null
+        };
+      }
+
+      setConversationsMetadata(
+        prev => ({
+          ...prev,
+          [targetRoomId]: {
+            ...(prev[targetRoomId] ||
+              {}),
+            unreadCount: 0
+          }
+        })
+      );
+
+      setActiveView('chat');
+      setCurrentRoom(targetRoom);
+      setChatLog([]);
+      setIsSelectionMode(false);
+      setSelectedMessageIds(
+        new Set()
+      );
+
+      if (
+        socket &&
+        targetRoomId
+      ) {
+        socket.emit(
+          'join_room',
+          {
+            room: targetRoomId,
+            username:
+              currentUsername,
+            userId:
+              currentUserId
+          }
+        );
+      }
+    },
+    [
+      socket,
+      currentUserId,
+      currentUsername
+    ]
+  );
+
+  const triggerCreateGroup = async e => {
+    e.preventDefault();
+
+    if (!newGroupName.trim()) {
+      return;
+    }
+
     try {
-      const activeToken = localStorage.getItem("token");
-      const payload = { name: newGroupName.trim(), members: [...selectedMembers, currentUserId], createdBy: currentUserId };
-      const res = await axios.post(`${BASE_URL}/chat/groups`, payload, { headers: { Authorization: activeToken ? `Bearer ${activeToken}` : "" } });
-      setChatChannels(prev => [...prev, res.data]); setNewGroupName(''); setSelectedMembers([]); setShowCreateGroup(false); triggerToast("Group created successfully", "success");
-      if (socket) socket.emit("new_group_created", res.data);
-    } catch (err) { triggerToast("Error creating group channel", "error"); }
+      const activeToken =
+        localStorage.getItem('token');
+
+      const payload = {
+        name:
+          newGroupName.trim(),
+        members: [
+          ...selectedMembers,
+          currentUserId
+        ],
+        createdBy:
+          currentUserId
+      };
+
+      const res =
+        await axios.post(
+          `${BASE_URL}/chat/groups`,
+          payload,
+          {
+            headers: {
+              Authorization:
+                activeToken
+                  ? `Bearer ${activeToken}`
+                  : ''
+            }
+          }
+        );
+
+      setChatChannels(prev => [
+        ...prev,
+        res.data
+      ]);
+
+      setNewGroupName('');
+      setSelectedMembers([]);
+      setShowCreateGroup(false);
+
+      triggerToast(
+        'Group created successfully',
+        'success'
+      );
+
+      if (socket) {
+        socket.emit(
+          'new_group_created',
+          res.data
+        );
+      }
+    } catch (err) {
+      console.error(err);
+
+      triggerToast(
+        'Error creating group channel',
+        'error'
+      );
+    }
   };
 
-  const toggleMemberSelection = (memberId) => { setSelectedMembers(prev => prev.includes(memberId) ? prev.filter(id => id !== memberId) : [...prev, memberId]); };
+  const toggleMemberSelection =
+    memberId => {
+      setSelectedMembers(prev =>
+        prev.includes(memberId)
+          ? prev.filter(
+            id => id !== memberId
+          )
+          : [
+            ...prev,
+            memberId
+          ]
+      );
+    };
 
-  const handleInputChange = (e) => {
-    setMessage(e.target.value); if (!socket || !currentRoom) return;
-    const roomId = currentRoom.id || currentRoom._id;
-    socket.emit("typing", { room: roomId, username: currentUsername, isTyping: true });
-    clearTimeout(typingTimeoutRef.current);
-    typingTimeoutRef.current = setTimeout(() => { socket.emit("typing", { room: roomId, username: currentUsername, isTyping: false }); }, 2000);
+  const handleInputChange = e => {
+    setMessage(e.target.value);
+
+    if (!socket || !currentRoom) {
+      return;
+    }
+
+    const roomId =
+      currentRoom.id ||
+      currentRoom._id;
+
+    socket.emit('typing', {
+      room: roomId,
+      username: currentUsername,
+      isTyping: true
+    });
+
+    clearTimeout(
+      typingTimeoutRef.current
+    );
+
+    typingTimeoutRef.current =
+      setTimeout(() => {
+        socket.emit(
+          'typing',
+          {
+            room: roomId,
+            username:
+              currentUsername,
+            isTyping: false
+          }
+        );
+      }, 2000);
   };
 
-  const handleFileChange = (e) => {
-    const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
-    if (!file) return;
+  const handleFileChange = e => {
+    const files = Array.from(
+      e.target.files || []
+    );
 
-    // Enforce rigid size limit checks
-    if (file.type.startsWith('video/')) {
-      if (file.size > 15 * 1024 * 1024) {
-        triggerToast("Video too large! Max is 15MB.", "error");
+    if (!files.length) {
+      return;
+    }
+
+    const processFiles = async () => {
+      const processed = [];
+
+      for (const file of files) {
+        if (
+          file.type.startsWith(
+            'video/'
+          ) &&
+          file.size >
+          15 * 1024 * 1024
+        ) {
+          triggerToast(
+            `${file.name} is too large. Maximum video size is 15MB.`,
+            'error'
+          );
+
+          continue;
+        }
+
+        try {
+          const dataUrl =
+            await new Promise(
+              (
+                resolve,
+                reject
+              ) => {
+                const reader =
+                  new FileReader();
+
+                reader.onloadend =
+                  () => {
+                    if (
+                      typeof reader.result ===
+                      'string'
+                    ) {
+                      resolve(
+                        reader.result
+                      );
+                    } else {
+                      reject(
+                        new Error(
+                          'Failed to read file'
+                        )
+                      );
+                    }
+                  };
+
+                reader.onerror =
+                  () =>
+                    reject(
+                      reader.error
+                    );
+
+                reader.readAsDataURL(
+                  file
+                );
+              }
+            );
+
+          let type = 'file';
+
+          if (
+            file.type.startsWith(
+              'image/'
+            )
+          ) {
+            type = 'image';
+          } else if (
+            file.type.startsWith(
+              'video/'
+            )
+          ) {
+            type = 'video';
+          } else if (
+            file.type.startsWith(
+              'audio/'
+            )
+          ) {
+            type = 'audio';
+          }
+
+          processed.push({
+            name: file.name,
+            type,
+            mimeType:
+              file.type,
+            size: file.size,
+            url: dataUrl,
+            rawFile: file
+          });
+        } catch (err) {
+          console.error(
+            'Failed to process:',
+            file.name,
+            err
+          );
+
+          triggerToast(
+            `Failed to load ${file.name}`,
+            'error'
+          );
+        }
+      }
+
+      if (processed.length) {
+        setSelectedFiles(
+          prev => [
+            ...prev,
+            ...processed
+          ]
+        );
+      }
+    };
+
+    processFiles();
+
+    e.target.value = '';
+  };
+
+  const handleSendMessage =
+    async e => {
+      e.preventDefault();
+
+      if (
+        !message.trim() &&
+        selectedFiles.length === 0
+      ) {
         return;
       }
-    }
 
-    // 🎯 high-performance memory management optimization: Use raw local blob references instead of Base64 strings
-    const objectUrl = URL.createObjectURL(file);
+      if (!socket) {
+        return;
+      }
 
-    if (file.type.startsWith('image/')) {
-      const img = new Image();
-      img.src = objectUrl;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        const MAX_BOUND = 1000;
-        let w = img.width;
-        let h = img.height;
+      setIsUploading(true);
 
-        // Maintain proper asset layout ratios
-        if (w > MAX_BOUND || h > MAX_BOUND) {
-          if (w > h) {
-            h = Math.round((h * MAX_BOUND) / w);
-            w = MAX_BOUND;
-          } else {
-            w = Math.round((w * MAX_BOUND) / h);
-            h = MAX_BOUND;
+      const roomId =
+        currentRoom?.id ||
+        currentRoom?._id ||
+        'global_workspace';
+
+      try {
+        if (
+          selectedFiles.length === 0
+        ) {
+          socket.emit(
+            'send_message',
+            {
+              room: roomId,
+
+              senderId:
+                currentUserId,
+
+              senderName:
+                currentUsername,
+
+              senderAvatar:
+                user?.profileImage ||
+                user?.avatar ||
+                null,
+
+              message:
+                message.trim(),
+
+              type: 'text',
+
+              attachment: null,
+
+              attachmentType:
+                null,
+
+              createdAt:
+                new Date(),
+
+              replyTo:
+                replyingMessage
+                  ? {
+                    messageId:
+                      replyingMessage._id,
+                    message:
+                      replyingMessage.message,
+                    senderName:
+                      replyingMessage.senderName,
+                    type:
+                      replyingMessage.type,
+                    attachmentType:
+                      replyingMessage.attachmentType
+                  }
+                  : null
+            }
+          );
+        } else {
+          const mediaGroupId =
+            selectedFiles.length >
+              1
+              ? `${currentUserId}-${Date.now()}-${Math.random()
+                .toString(36)
+                .slice(2, 8)}`
+              : null;
+
+          for (
+            let i = 0;
+            i < selectedFiles.length;
+            i++
+          ) {
+            const file =
+              selectedFiles[i];
+
+            let attachmentUrl =
+              file.url;
+
+            if (
+              file.rawFile instanceof
+              Blob
+            ) {
+              attachmentUrl =
+                await new Promise(
+                  (
+                    resolve,
+                    reject
+                  ) => {
+                    const reader =
+                      new FileReader();
+
+                    reader.onloadend =
+                      () => {
+                        if (
+                          typeof reader.result ===
+                          'string'
+                        ) {
+                          resolve(
+                            reader.result
+                          );
+                        } else {
+                          reject(
+                            new Error(
+                              'Failed to convert attachment.'
+                            )
+                          );
+                        }
+                      };
+
+                    reader.onerror =
+                      () =>
+                        reject(
+                          reader.error ||
+                          new Error(
+                            'Failed to read attachment.'
+                          )
+                        );
+
+                    reader.readAsDataURL(
+                      file.rawFile
+                    );
+                  }
+                );
+            }
+
+            socket.emit(
+              'send_message',
+              {
+                room: roomId,
+
+                senderId:
+                  currentUserId,
+
+                senderName:
+                  currentUsername,
+
+                senderAvatar:
+                  user?.profileImage ||
+                  user?.avatar ||
+                  null,
+
+                message:
+                  i === 0
+                    ? message.trim()
+                    : '',
+
+                type: file.type,
+
+                attachment:
+                  attachmentUrl,
+
+                attachmentType:
+                  file.name,
+
+                mediaGroupId,
+
+                createdAt:
+                  new Date(),
+
+                replyTo:
+                  i === 0 &&
+                    replyingMessage
+                    ? {
+                      messageId:
+                        replyingMessage._id,
+                      message:
+                        replyingMessage.message,
+                      senderName:
+                        replyingMessage.senderName,
+                      type:
+                        replyingMessage.type,
+                      attachmentType:
+                        replyingMessage.attachmentType
+                    }
+                    : null
+              }
+            );
           }
         }
 
-        canvas.width = w;
-        canvas.height = h;
-        ctx.drawImage(img, 0, 0, w, h);
+        setMessage('');
+        setSelectedFiles([]);
 
-        // Convert to compressed binary blob instead of a heavy base64 string layout array
-        canvas.toBlob((compressedBlob) => {
-          const efficientUrl = URL.createObjectURL(compressedBlob);
-          setSelectedFile({
-            name: file.name,
-            url: efficientUrl, // Local caching preview reference
-            rawFile: file,     // Sent via a clean multipart upload payload form if needed
-            type: 'image'
-          });
-          URL.revokeObjectURL(objectUrl); // Clean browser memory allocations immediately
-        }, 'image/jpeg', 0.8);
-      };
-    } else {
-      setSelectedFile({
-        name: file.name,
-        url: objectUrl,
-        rawFile: file,
-        type: file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : 'file'
-      });
-    }
-  };
+        if (cancelReply) {
+          cancelReply();
+        }
 
-  const handleSendMessage = async (e) => {
-    e.preventDefault();
+        socket.emit('typing', {
+          room: roomId,
+          username:
+            currentUsername,
+          isTyping: false
+        });
+      } catch (err) {
+        console.error(
+          '❌ Failed to prepare/send attachments:',
+          err
+        );
 
-    if (!message.trim() && !selectedFile) return;
+        triggerToast(
+          'Failed to send attachment(s).',
+          'error'
+        );
+      } finally {
+        setIsUploading(false);
+      }
+    };
+
+  const triggerSaveEdit =
+    messageId => {
+      const roomId =
+        currentRoom?.id ||
+        currentRoom?._id ||
+        'global_workspace';
+
+      if (
+        !editInput.trim() ||
+        !socket
+      ) {
+        return;
+      }
+
+      socket.emit(
+        'edit_message',
+        {
+          room: roomId,
+          messageId,
+          newMessage:
+            editInput.trim()
+        }
+      );
+
+      setChatLog(prev =>
+        prev.map(m =>
+          m._id === messageId
+            ? {
+              ...m,
+              message:
+                editInput.trim()
+            }
+            : m
+        )
+      );
+
+      setEditingMessageId(null);
+
+      triggerToast(
+        'Message updated successfully',
+        'success'
+      );
+    };
+
+  const triggerDelete =
+    messageId => {
+      if (!socket) return;
+
+      const roomId =
+        currentRoom?.id ||
+        currentRoom?._id ||
+        'global_workspace';
+
+      const confirmation = (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+            width: '100%',
+            padding: '2px 0'
+          }}
+        >
+          <span
+            style={{
+              fontSize: '0.86rem',
+              color: '#0f172a',
+              fontWeight: 700
+            }}
+          >
+            Delete message
+            permanently?
+          </span>
+
+          <div
+            style={{
+              display: 'flex',
+              gap: '10px',
+              justifyContent:
+                'flex-end'
+            }}
+          >
+            <button
+              onClick={() => {
+                socket.emit(
+                  'delete_message',
+                  {
+                    room: roomId,
+                    messageId
+                  }
+                );
+
+                setChatLog(prev =>
+                  prev.filter(
+                    m =>
+                      m._id !==
+                      messageId
+                  )
+                );
+
+                setToast({
+                  show: false,
+                  message: '',
+                  type: 'info'
+                });
+
+                triggerToast(
+                  'Message deleted successfully',
+                  'success'
+                );
+              }}
+              style={{
+                background:
+                  'linear-gradient(135deg, #f43f5e, #e11d48)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '10px',
+                padding: '0 14px',
+                height: '36px',
+                cursor: 'pointer',
+                fontSize: '0.75rem',
+                fontWeight: 600
+              }}
+            >
+              Delete
+            </button>
+
+            <button
+              onClick={() =>
+                setToast({
+                  show: false,
+                  message: '',
+                  type: 'info'
+                })
+              }
+              style={{
+                background: '#ffffff',
+                color: '#475569',
+                border:
+                  '1px solid #cbd5e1',
+                borderRadius: '10px',
+                padding: '0 14px',
+                height: '36px',
+                cursor: 'pointer',
+                fontSize: '0.75rem',
+                fontWeight: 600
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      );
+
+      triggerToast(
+        confirmation,
+        'error'
+      );
+    };
+
+  const triggerAddReaction = (
+    messageId,
+    emoji
+  ) => {
     if (!socket) return;
-
-    setIsUploading(true);
 
     const roomId =
       currentRoom?.id ||
       currentRoom?._id ||
       'global_workspace';
 
-    try {
-      let attachmentUrl = null;
-      let attachmentType = null;
+    socket.emit(
+      'send_reaction',
+      {
+        room: roomId,
+        messageId,
+        emoji,
+        username:
+          currentUsername
+      }
+    );
+  };
 
-      // ============================================================
-      // 1. UPLOAD REAL FILE TO SERVER
-      // ============================================================
+  const triggerDeleteConversation =
+    roomId => {
+      if (!socket) return;
 
-      if (selectedFile?.rawFile) {
-        console.log("📤 Uploading chat attachment:", {
-          name: selectedFile.name,
-          type: selectedFile.type,
-          size: selectedFile.rawFile.size
-        });
-
-        const formData = new FormData();
-
-        formData.append(
-          "file",
-          selectedFile.rawFile,
-          selectedFile.name || "chat-media"
-        );
-
-        const uploadResponse = await axios.post(
-          `${BASE_URL}/chat/upload`,
-          formData
-        );
-
-        if (!uploadResponse.data?.success || !uploadResponse.data?.url) {
-          throw new Error("Server did not return a valid uploaded file URL.");
+      socket.emit(
+        'clear_conversation_history',
+        {
+          room: roomId,
+          userId: currentUserId
         }
+      );
+    };
 
-        attachmentUrl = `${BASE_URL}${uploadResponse.data.url}`;
-        attachmentType =
-          uploadResponse.data.mimeType ||
-          selectedFile.name ||
-          null;
+  const toggleSelectMessage =
+    useCallback(msgId => {
+      setSelectedMessageIds(
+        prev => {
+          const next =
+            new Set(prev);
 
-        console.log("✅ Chat attachment uploaded:", attachmentUrl);
-      }
-
-      // ============================================================
-      // 2. SEND MESSAGE THROUGH SOCKET.IO
-      // ============================================================
-
-      socket.emit("send_message", {
-        room: roomId,
-
-        senderId: currentUserId,
-
-        senderName: currentUsername,
-
-        senderAvatar:
-          user?.profileImage ||
-          user?.avatar ||
-          null,
-
-        message: message.trim(),
-
-        type: selectedFile
-          ? selectedFile.type
-          : "text",
-
-        // IMPORTANT:
-        // This is now the SERVER URL, NOT blob:http://...
-        attachment: attachmentUrl,
-
-        attachmentType,
-
-        createdAt: new Date(),
-
-        replyTo: replyingMessage
-          ? {
-            messageId: replyingMessage._id,
-            message: replyingMessage.message,
-            senderName: replyingMessage.senderName
+          if (
+            next.has(msgId)
+          ) {
+            next.delete(msgId);
+          } else {
+            next.add(msgId);
           }
-          : null
-      });
 
-      // ============================================================
-      // 3. CLEAN UP COMPOSER
-      // ============================================================
+          return next;
+        }
+      );
+    }, []);
 
-      setMessage('');
-      setSelectedFile(null);
-
-      if (cancelReply) {
-        cancelReply();
+  const triggerBulkDelete =
+    useCallback(() => {
+      if (
+        !socket ||
+        !currentRoom ||
+        selectedMessageIds.size ===
+        0
+      ) {
+        return;
       }
 
-      socket.emit("typing", {
-        room: roomId,
-        username: currentUsername,
-        isTyping: false
-      });
+      const roomId =
+        currentRoom.id ||
+        currentRoom._id;
 
-    } catch (error) {
-      console.error("❌ Failed to send chat attachment:", error);
+      const confirmation = (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+            width: '100%',
+            padding: '2px 0'
+          }}
+        >
+          <span
+            style={{
+              fontSize: '0.86rem',
+              color: '#0f172a',
+              fontWeight: 700
+            }}
+          >
+            Purge all{' '}
+            {selectedMessageIds.size}{' '}
+            records permanently?
+          </span>
 
-      const serverMessage =
-        error?.response?.data?.message ||
-        error?.message ||
-        "Failed to upload attachment.";
+          <div
+            style={{
+              display: 'flex',
+              gap: '10px',
+              justifyContent:
+                'flex-end'
+            }}
+          >
+            <button
+              onClick={() => {
+                socket.emit(
+                  'delete_multiple_messages',
+                  {
+                    room: roomId,
+                    messageIds:
+                      Array.from(
+                        selectedMessageIds
+                      )
+                  }
+                );
 
-      triggerToast?.(serverMessage, "error");
+                setToast({
+                  show: false,
+                  message: '',
+                  type: 'info'
+                });
+              }}
+              style={{
+                background:
+                  'linear-gradient(135deg, #f43f5e, #e11d48)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '10px',
+                padding: '0 14px',
+                height: '36px',
+                cursor: 'pointer',
+                fontSize: '0.75rem',
+                fontWeight: 600
+              }}
+            >
+              Confirm Bulk Clear
+            </button>
 
-    } finally {
-      setIsUploading(false);
-    }
-  };
+            <button
+              onClick={() =>
+                setToast({
+                  show: false,
+                  message: '',
+                  type: 'info'
+                })
+              }
+              style={{
+                background: '#ffffff',
+                color: '#475569',
+                border:
+                  '1px solid #cbd5e1',
+                borderRadius: '10px',
+                padding: '0 14px',
+                height: '36px',
+                cursor: 'pointer',
+                fontSize: '0.75rem'
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      );
 
-  const triggerSaveEdit = (messageId) => {
-    const roomId = currentRoom?.id || currentRoom?._id || 'global_workspace';
-    if (!editInput.trim() || !socket) return;
-    socket.emit("edit_message", { room: roomId, messageId, newMessage: editInput.trim() });
-    setChatLog(prev => prev.map(m => m._id === messageId ? { ...m, message: editInput.trim() } : m));
-    setEditingMessageId(null); triggerToast("Message updated successfully", "success");
-  };
+      triggerToast(
+        confirmation,
+        'error'
+      );
+    }, [
+      socket,
+      currentRoom,
+      selectedMessageIds,
+      triggerToast
+    ]);
 
-  const triggerDelete = (messageId) => {
-    if (!socket) return;
-    const roomId = currentRoom?.id || currentRoom?._id || 'global_workspace';
-    triggerToast(<div style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%', padding: '2px 0' }}><span style={{ fontSize: '0.86rem', color: '#0f172a', fontWeight: 700 }}>Delete message permanently?</span><div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}><button onClick={() => { socket.emit("delete_message", { room: roomId, messageId }); setChatLog(prev => prev.filter(m => m._id !== messageId)); triggerToast("Message deleted successfully", "success"); }} style={{ background: 'linear-gradient(135deg, #f43f5e, #e11d48)', color: '#fff', border: 'none', borderRadius: '10px', width: '36px', height: '36px', cursor: 'pointer' }}><Trash2 size={16} /></button><button onClick={() => setToast({ show: false, message: '', type: 'info' })} style={{ background: '#ffffff', color: '#475569', border: '1px solid #cbd5e1', borderRadius: '10px', width: '36px', height: '36px', cursor: 'pointer' }}><X size={16} /></button></div></div>, "error");
-  };
+  const recentChatsList =
+    useMemo(() => {
+      const list = [];
 
-  const triggerAddReaction = (messageId, emoji) => { if (!socket) return; const roomId = currentRoom?.id || currentRoom?._id || 'global_workspace'; socket.emit("send_reaction", { room: roomId, messageId, emoji, username: currentUsername }); };
-  const triggerDeleteConversation = (roomId) => { if (!socket) return; socket.emit("clear_conversation_history", { room: roomId, userId: currentUserId }); };
+      personalContacts.forEach(
+        contact => {
+          const jointRoomId = [
+            String(currentUserId),
+            String(contact.id)
+          ]
+            .sort()
+            .join('_');
 
-  const toggleSelectMessage = useCallback((msgId) => { setSelectedMessageIds(prev => { const next = new Set(prev); if (next.has(msgId)) next.delete(msgId); else next.add(msgId); return next; }); }, []);
-  const triggerBulkDelete = useCallback(() => { if (!socket || !currentRoom || selectedMessageIds.size === 0) return; const roomId = currentRoom.id || currentRoom._id; triggerToast(<div style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%', padding: '2px 0' }}><span style={{ fontSize: '0.86rem', color: '#0f172a', fontWeight: 700 }}>Purge all {selectedMessageIds.size} records permanently?</span><div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}><button onClick={() => { socket.emit("delete_multiple_messages", { room: roomId, messageIds: Array.from(selectedMessageIds) }); setToast({ show: false, message: '', type: 'info' }); }} style={{ background: 'linear-gradient(135deg, #f43f5e, #e11d48)', color: '#fff', border: 'none', borderRadius: '10px', padding: '0 14px', height: '36px', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600 }}>Confirm Bulk Clear</button><button onClick={() => setToast({ show: false, message: '', type: 'info' })} style={{ background: '#ffffff', color: '#475569', border: '1px solid #cbd5e1', borderRadius: '10px', width: '56px', height: '36px', cursor: 'pointer', fontSize: '0.75rem' }}>Cancel</button></div></div>, "error"); }, [socket, currentRoom, selectedMessageIds, triggerToast]);
+          const meta =
+            conversationsMetadata[
+            jointRoomId
+            ];
 
-  const recentChatsList = useMemo(() => {
-    const list = [];
-    personalContacts.forEach(contact => {
-      const jointRoomId = [String(currentUserId), String(contact.id)].sort().join('_'), meta = conversationsMetadata[jointRoomId];
-      if (meta && (meta.lastMessage || meta.timestamp)) { list.push({ id: contact.id, roomId: jointRoomId, name: contact.name, avatar: contact.avatar || contact.profileImage || null, type: 'peer', isOnline: activeUsersList.some(u => String(u.userId) === String(contact.id)), lastMessage: meta.lastMessage, unreadCount: meta.unreadCount || 0, timestamp: meta.timestamp ? new Date(meta.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '', rawTime: meta.timestamp ? new Date(meta.timestamp).getTime() : 0 }); }
-    });
-    chatChannels.forEach(channel => {
-      const roomId = channel._id || channel.id, meta = conversationsMetadata[roomId];
-      if (meta && (meta.lastMessage || meta.timestamp)) { list.push({ id: roomId, roomId: roomId, name: channel.name, avatar: channel.avatar || channel.profileImage || null, type: 'group', isOnline: false, lastMessage: meta.lastMessage, unreadCount: meta.unreadCount || 0, timestamp: meta.timestamp ? new Date(meta.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '', rawTime: meta.timestamp ? new Date(meta.timestamp).getTime() : 0 }); }
-    });
-    return list.sort((a, b) => b.rawTime - a.rawTime);
-  }, [personalContacts, chatChannels, conversationsMetadata, activeUsersList, currentUserId]);
+          if (
+            meta &&
+            (
+              meta.lastMessage ||
+              meta.timestamp
+            )
+          ) {
+            list.push({
+              id: contact.id,
+              roomId:
+                jointRoomId,
+              name:
+                contact.name,
+              avatar:
+                contact.avatar ||
+                contact.profileImage ||
+                null,
+              type: 'peer',
+              isOnline:
+                activeUsersList.some(
+                  u =>
+                    String(
+                      u.userId
+                    ) ===
+                    String(
+                      contact.id
+                    )
+                ),
+              lastMessage:
+                meta.lastMessage,
+              unreadCount:
+                meta.unreadCount ||
+                0,
+              timestamp:
+                meta.timestamp
+                  ? new Date(
+                    meta.timestamp
+                  ).toLocaleTimeString(
+                    [],
+                    {
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    }
+                  )
+                  : '',
+              rawTime:
+                meta.timestamp
+                  ? new Date(
+                    meta.timestamp
+                  ).getTime()
+                  : 0
+            });
+          }
+        }
+      );
+
+      chatChannels.forEach(
+        channel => {
+          const roomId =
+            channel._id ||
+            channel.id;
+
+          const meta =
+            conversationsMetadata[
+            roomId
+            ];
+
+          if (
+            meta &&
+            (
+              meta.lastMessage ||
+              meta.timestamp
+            )
+          ) {
+            list.push({
+              id: roomId,
+              roomId,
+              name:
+                channel.name,
+              avatar:
+                channel.avatar ||
+                channel.profileImage ||
+                null,
+              type: 'group',
+              isOnline: false,
+              lastMessage:
+                meta.lastMessage,
+              unreadCount:
+                meta.unreadCount ||
+                0,
+              timestamp:
+                meta.timestamp
+                  ? new Date(
+                    meta.timestamp
+                  ).toLocaleTimeString(
+                    [],
+                    {
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    }
+                  )
+                  : '',
+              rawTime:
+                meta.timestamp
+                  ? new Date(
+                    meta.timestamp
+                  ).getTime()
+                  : 0
+            });
+          }
+        }
+      );
+
+      return list.sort(
+        (a, b) =>
+          b.rawTime -
+          a.rawTime
+      );
+    }, [
+      personalContacts,
+      chatChannels,
+      conversationsMetadata,
+      activeUsersList,
+      currentUserId
+    ]);
 
   return {
-    socket, isOpen, setIsOpen, activeView, setActiveView, currentRoom, setCurrentRoom, chatChannels, personalContacts, message, setMessage, chatLog, typingUser, showEmojiPicker, setShowEmojiPicker, selectedFile, setSelectedFile, hoveredMessageId, setHoveredMessageId, editingMessageId, setEditingMessageId, editInput, setEditInput, toast, setToast, activeUsersList, reactionsMap, REACTION_OPTIONS, messageEndRef, showCreateGroup, setShowCreateGroup, newGroupName, setNewGroupName, selectedMembers, navigateToRoom, handleInputChange, handleFileChange, handleSendMessage, triggerSaveEdit, triggerDelete, triggerAddReaction, triggerCreateGroup, lightboxState, setLightboxState, activeAudioMemoId, setActivePlayingMemoId, toggleMemberSelection, recentChatsList, conversationsMetadata, setConversationsMetadata, isSelectionMode, setIsSelectionMode, selectedMessageIds, setSelectedMessageIds, toggleSelectMessage, triggerBulkDelete, triggerDeleteConversation, isUploading, replyingMessage,
+    socket,
+
+    isOpen,
+    setIsOpen,
+
+    activeView,
+    setActiveView,
+
+    currentRoom,
+    setCurrentRoom,
+
+    chatChannels,
+    personalContacts,
+
+    message,
+    setMessage,
+
+    chatLog,
+
+    typingUser,
+
+    showEmojiPicker,
+    setShowEmojiPicker,
+
+    selectedFiles,
+    setSelectedFiles,
+
+    hoveredMessageId,
+    setHoveredMessageId,
+
+    editingMessageId,
+    setEditingMessageId,
+
+    editInput,
+    setEditInput,
+
+    toast,
+    setToast,
+
+    activeUsersList,
+    reactionsMap,
+
+    REACTION_OPTIONS,
+
+    messageEndRef,
+
+    showCreateGroup,
+    setShowCreateGroup,
+
+    newGroupName,
+    setNewGroupName,
+
+    selectedMembers,
+
+    navigateToRoom,
+
+    handleInputChange,
+    handleFileChange,
+    handleSendMessage,
+
+    triggerSaveEdit,
+    triggerDelete,
+    triggerAddReaction,
+
+    triggerCreateGroup,
+
+    lightboxState,
+    setLightboxState,
+
+    activeAudioMemoId,
+    setActivePlayingMemoId,
+
+    toggleMemberSelection,
+
+    recentChatsList,
+
+    conversationsMetadata,
+    setConversationsMetadata,
+
+    isSelectionMode,
+    setIsSelectionMode,
+
+    selectedMessageIds,
+    setSelectedMessageIds,
+
+    toggleSelectMessage,
+    triggerBulkDelete,
+    triggerDeleteConversation,
+
+    isUploading,
+
+    replyingMessage,
     setReplyingMessage,
     startReply,
-    cancelReply, ...mediaProps
+    cancelReply,
+
+    ...mediaProps
   };
 };
