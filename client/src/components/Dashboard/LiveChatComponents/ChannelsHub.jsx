@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, Plus, X, Users, Search } from 'lucide-react';
+import { Plus, X, Users, Search } from 'lucide-react';
 
 export const ChannelsHub = ({ chatProps, resolveDrawerImgUrl }) => {
   const { 

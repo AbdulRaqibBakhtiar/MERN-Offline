@@ -1,248 +1,274 @@
-import React from 'react';
-import { useParams } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, MessageCircle, PackageCheck, Play, ShieldCheck, Star, Trash2 } from 'lucide-react';
+import { API_BASE_URL } from '../api/config';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import ImageUploadCrop from '../components/Modal/ImageUploadCrop';
-import DeleteModal from '../components/Modal/DeleteModal';
-import SuccessModal from '../components/Modal/SuccessModal';
-import PurchaseInvoiceModal from '../components/Modal/PurchaseInvoiceModal';
-
-// Decoupled Architectural Logic Modules
+import { useSocket } from '../context/SocketContext';
 import { usePurchaseData } from '../hooks/usePurchaseData';
 import PurchaseLoading from '../components/Inventory/PurchaseLoading';
 import PurchaseError from '../components/Inventory/PurchaseError';
+import DeleteModal from '../components/Modal/DeleteModal';
+import SuccessModal from '../components/Modal/SuccessModal';
+import PurchaseInvoiceModal from '../components/Modal/PurchaseInvoiceModal';
+import { LiveChatDrawer } from '../components/Dashboard/LiveChatDrawer';
+import UserAvatar from '../components/Layout/UserAvatar';
 
-function ProductPurchasePage({ itemId: propItemId, onBack }) {
-  const { token } = useAuth();
-  const { itemId: urlItemId } = useParams();
-  const itemId = propItemId || urlItemId;
+const mediaUrl = path => path?.startsWith('http') ? path : `${API_BASE_URL}${path || ''}`;
 
-  // Destructure logical hook matrices
-    // Destructure logical hook matrices
+function ProductPurchasePage({ itemId: propItemId, onBack, onOpenSellerChat }) {
+  const navigate = useNavigate();
+  const { token, user } = useAuth();
+  const { socket } = useSocket();
+  const { itemId: routeItemId } = useParams();
+  const itemId = propItemId || routeItemId;
+  const handleBack = () => onBack ? onBack() : navigate('/home');
+  const [chatRequest, setChatRequest] = useState(null);
+  const [mediaIndex, setMediaIndex] = useState(0);
+  const [keptMedia, setKeptMedia] = useState([]);
+  const [newFiles, setNewFiles] = useState([]);
+  const [filePreviews, setFilePreviews] = useState([]);
+  const [quantity, setQuantity] = useState(1);
+
   const {
     isSuccessOpen, setIsSuccessOpen, successMsg, setSuccessMsg,
     product, setProduct, loading, error,
     userRating, setUserRating, userComment, setUserComment,
-    reviewSubmitting, setReviewSubmitting, // 👈 Added setReviewSubmitting here
-    hoverRating, setHoverRating,
-    isCheckoutOpen, setIsCheckoutOpen, orderQuantity, setOrderQuantity,
-    hoveredBtnId, setHoveredBtnId, isEditMode, setIsEditMode,
-    editName, setEditName, editBrand, setEditBrand, editQuantity, setEditQuantity,
-    editPrice, setEditPrice, editCategory, setEditCategory, editDescription, setEditDescription,
-    editCondition, setEditCondition, editWarranty, setEditWarranty, editDimensions, setEditDimensions,
-    editWeight, setEditWeight, editPowerSource, setEditPowerSource,
-    isEditCropOpen, setIsEditCropOpen, 
-    finalEditFile, setFinalEditFile,       // 👈 Added setFinalEditFile here
-    editPreviewUrl, setEditPreviewUrl,     // 👈 Added setEditPreviewUrl here
-    saveSubmitting, setSaveSubmitting, deleteTargetId, setDeleteTargetId,
-    hydrateFormStates, handleCroppedEditReturn, handleCompletePurchase
+    reviewSubmitting, setReviewSubmitting, hoverRating, setHoverRating,
+    isCheckoutOpen, setIsCheckoutOpen, setOrderQuantity, purchaseSubmitting, checkoutError, setCheckoutError,
+    isEditMode, setIsEditMode,
+    editName, setEditName, editBrand, setEditBrand,
+    editQuantity, setEditQuantity, editPrice, setEditPrice,
+    editCategory, setEditCategory, editDescription, setEditDescription,
+    editCondition, setEditCondition, editWarranty, setEditWarranty,
+    editDimensions, setEditDimensions, editWeight, setEditWeight,
+    editPowerSource, setEditPowerSource, saveSubmitting, setSaveSubmitting,
+    deleteTargetId, setDeleteTargetId, hydrateFormStates, handleCompletePurchase
   } = usePurchaseData({ itemId, token, onBack });
 
+  useEffect(() => {
+    if (!product) return;
+    const media = Array.isArray(product.media) ? product.media.filter(item => item?.url) : [];
+    if (product.imagePath && !media.some(item => item.url === product.imagePath)) {
+      media.unshift({ url: product.imagePath, type: 'image' });
+    }
+    setKeptMedia(media);
+    setNewFiles([]);
+    setMediaIndex(0);
+  }, [product]);
 
+  useEffect(() => {
+    const previews = newFiles.map(file => ({
+      url: URL.createObjectURL(file),
+      type: file.type.startsWith('video/') ? 'video' : 'image',
+      name: file.name,
+      staged: true
+    }));
+    setFilePreviews(previews);
+    return () => previews.forEach(item => URL.revokeObjectURL(item.url));
+  }, [newFiles]);
+
+  const gallery = useMemo(() => [...keptMedia, ...filePreviews], [keptMedia, filePreviews]);
+  const activeMedia = gallery[mediaIndex] || null;
   if (loading) return <PurchaseLoading />;
-  if (error || !product) return <PurchaseError error={error} onBack={onBack} />;
+  if (error || !product) return <PurchaseError error={error} onBack={handleBack} />;
+
+  const sellerId = typeof product.createdBy === 'object' ? product.createdBy?._id : product.createdBy;
+  const hasSellerAccount = Boolean(sellerId);
+  const isOwner = String(sellerId) === String(user?._id || user?.id);
+  const canManage = user?.role === 'admin' || isOwner;
+  const hasReviewed = product.reviews?.some(review => String(review.userId?._id || review.userId) === String(user?._id || user?.id));
+  const average = Number(product.averageRating || 0);
+  const reviewCount = product.reviews?.length || 0;
+  const openSellerChat = () => {
+    if (!hasSellerAccount) {
+      setSuccessMsg('Seller chat is unavailable because this listing has no seller account linked.');
+      setIsSuccessOpen(true);
+      return;
+    }
+    const request = { vendor: product.createdBy, product, requestId: Date.now() };
+    if (onOpenSellerChat) onOpenSellerChat(request);
+    else setChatRequest(request);
+  };
+
+  const claimListing = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/inventory/${product._id || itemId}/claim`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not assign this listing.');
+      setProduct(data);
+      setSuccessMsg('Listing assigned to your admin account. Buyers can now contact you and place orders.');
+      setIsSuccessOpen(true);
+    } catch (claimError) {
+      setSuccessMsg(claimError.message || 'Could not connect to the server.');
+      setIsSuccessOpen(true);
+    }
+  };
+
+  const saveListing = async () => {
+    try {
+      setSaveSubmitting(true);
+      const formData = new FormData();
+      Object.entries({ name: editName, brand: editBrand, quantity: Number(editQuantity), price: Number(editPrice), category: editCategory, description: editDescription, condition: editCondition, warranty: editWarranty }).forEach(([key, value]) => formData.append(key, value));
+      formData.append('specifications[dimensions]', editDimensions);
+      formData.append('specifications[weight]', editWeight);
+      formData.append('specifications[powerSource]', editPowerSource);
+      formData.append('keepMedia', JSON.stringify(keptMedia));
+      newFiles.forEach(file => formData.append('productMedia', file));
+      const response = await fetch(`${API_BASE_URL}/inventory/${product._id || itemId}`, {
+        method: 'PUT', headers: { Authorization: `Bearer ${token}` }, body: formData
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not save this listing.');
+      setProduct(data);
+      setKeptMedia(data.media || []);
+      setNewFiles([]);
+      setMediaIndex(0);
+      setIsEditMode(false);
+      setSuccessMsg('Your listing has been updated.');
+      setIsSuccessOpen(true);
+    } catch (saveError) {
+      setSuccessMsg(saveError.message || 'Could not connect to the server.');
+      setIsSuccessOpen(true);
+    } finally {
+      setSaveSubmitting(false);
+    }
+  };
+
+  const submitReview = async event => {
+    event.preventDefault();
+    if (!userComment.trim()) return;
+    try {
+      setReviewSubmitting(true);
+      const response = await fetch(`${API_BASE_URL}/inventory/${itemId}/review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ rating: userRating, comment: userComment.trim() })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not post your review.');
+      setProduct(data);
+      setUserComment('');
+      setUserRating(5);
+      setSuccessMsg('Your review has been posted.');
+      setIsSuccessOpen(true);
+    } catch (reviewError) {
+      setSuccessMsg(reviewError.message || 'Could not connect to the server.');
+      setIsSuccessOpen(true);
+    } finally {
+      setReviewSubmitting(false);
+    }
+  };
 
   return (
-    <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px', color: 'var(--text-primary, #0f172a)', fontFamily: 'system-ui, -apple-system, sans-serif', position: 'relative' }} className="purchase-page-view">
-      
-      {/* Upper Navigation Action Toolbar Block */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '28px', flexWrap: 'wrap', gap: '16px' }} className="purchase-view-header">
-        <button onClick={onBack} onMouseEnter={() => setHoveredBtnId('back_fleet')} onMouseLeave={() => setHoveredBtnId(null)} style={{ background: 'var(--bg-card, #ffffff)', border: '1px solid var(--border-color, #cbd5e1)', padding: '10px 20px', borderRadius: '10px', cursor: 'pointer', color: 'var(--text-primary, #475569)', fontWeight: '600', fontSize: '0.875rem', transition: 'all 0.2s', transform: hoveredBtnId === 'back_fleet' ? 'translateY(-1px)' : 'translateY(0)' }} >
-          ⬅️ Back to Fleet Workspace
-        </button>
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-          <button onClick={() => setDeleteTargetId(product?._id || itemId)} onMouseEnter={() => setHoveredBtnId('remove_asset')} onMouseLeave={() => setHoveredBtnId(null)} style={{ background: hoveredBtnId === 'remove_asset' ? '#b91c1c' : '#dc3545', color: '#ffffff', border: 'none', padding: '10px 20px', borderRadius: '10px', cursor: 'pointer', fontWeight: '600', fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.2s' }} >
-            🗑️ Remove Asset
-          </button>
-          <button onClick={() => { if (isEditMode) hydrateFormStates(product); setIsEditMode(!isEditMode); }} onMouseEnter={() => setHoveredBtnId('modify_param')} onMouseLeave={() => setHoveredBtnId(null)} style={{ background: isEditMode ? 'var(--text-muted, #64748b)' : hoveredBtnId === 'modify_param' ? '#4338ca' : '#4f46e5', color: '#ffffff', border: 'none', padding: '10px 20px', borderRadius: '10px', cursor: 'pointer', fontWeight: '600', fontSize: '0.875rem', transition: 'all 0.2s' }} >
-            {isEditMode ? "❌ Cancel Mod" : "⚙️ Modify Parameters"}
-          </button>
-        </div>
+    <main className="product-detail-page">
+      <div className="product-detail-topbar">
+        <button className="product-back-link" type="button" onClick={handleBack}><ArrowLeft size={16} /> Back to marketplace</button>
+        {canManage && <div className="product-owner-actions">
+          {user?.role === 'admin' && !hasSellerAccount && <button type="button" className="product-edit-action" onClick={claimListing}>Assign to my account</button>}
+          <button type="button" className="product-edit-action" onClick={() => { if (isEditMode) hydrateFormStates(product); setIsEditMode(value => !value); }}>{isEditMode ? 'Discard changes' : 'Edit listing'}</button>
+          <button type="button" className="product-delete-action" onClick={() => setDeleteTargetId(product._id || itemId)}><Trash2 size={15} /> Delete</button>
+        </div>}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', gap: '40px' }} className="purchase-workspace-grid">
-        
-        {/* Left Side: Media Workstation Frame Block */}
-        <div style={{ background: 'var(--bg-card, #ffffff)', border: '1px solid var(--border-color, #e2e8f0)', borderRadius: '16px', padding: '32px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', minHeight: '440px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)' }} className="purchase-media-workstation">
-          {isEditMode ? (
-            <div style={{ width: '100%', textAlign: 'center' }}>
-              <div style={{ height: '320px', display: 'flex', justifyContent: 'center', alignItems: 'center', overflow: 'hidden', border: '2px dashed var(--border-color, #cbd5e1)', borderRadius: '12px', background: 'var(--bg-main, #f8fafc)', marginBottom: '20px' }}>
-                {editPreviewUrl ? (
-                  <img src={editPreviewUrl} alt="New Crop" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
-                ) : product.imagePath ? (
-                  <img src={`http://localhost:5000${product.imagePath}`} alt="Current" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
-                ) : (
-                  <span style={{ fontSize: '0.9rem', color: 'var(--text-muted, #64748b)', fontWeight: '500' }}>No Photo Attached</span>
-                )}
-              </div>
-              <button type="button" onClick={() => setIsEditCropOpen(true)} style={{ padding: '10px 20px', background: '#0284c7', color: '#ffffff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: '600' }} >
-                📷 {finalEditFile ? "New Picture Staged" : "Replace Product Image File Asset..."}
-              </button>
-            </div>
-          ) : product.imagePath ? (
-            <img src={`http://localhost:5000${product.imagePath}`} alt={product.name} style={{ maxWidth: '100%', maxHeight: '440px', objectFit: 'contain', borderRadius: '12px' }} />
-          ) : (
-            <div style={{ textAlign: 'center', color: 'var(--text-muted, #94a3b8)' }}>
-              <span style={{ fontSize: '4.5rem', display: 'block', marginBottom: '12px' }}>🛠️</span>
-              <p style={{ margin: 0, fontWeight: '500', fontSize: '0.95rem' }}>No Visual Attached</p>
-            </div>
-          )}
-        </div>
 
-        {/* Right Side: Core Parameters Matrix InfoPane */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }} className="purchase-infopane">
-          {isEditMode ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', background: 'var(--bg-card, #ffffff)', padding: '24px', borderRadius: '16px', border: '1px solid var(--border-color, #e2e8f0)' }}>
-              <div>
-                <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-primary, #475569)', display: 'block', marginBottom: '6px' }}>Category Asset Code:</label>
-                <select value={editCategory} onChange={(e) => setEditCategory(e.target.value)} style={{ padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color, #cbd5e1)', width: '100%', outline: 'none', background: 'var(--bg-main, #ffffff)', color: 'var(--text-primary, inherit)', fontWeight: '500', fontSize: '0.9rem' }}>
-                  <option value="tools">Tools</option>
-                  <option value="hardware">Hardware</option>
-                  <option value="machinery">Machinery</option>
-                </select>
-              </div>
-              <div>
-                <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-primary, #475569)', display: 'block', marginBottom: '6px' }}>Product Model Label:</label>
-                <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} style={{ padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color, #cbd5e1)', width: '100%', outline: 'none', background: 'var(--bg-main, transparent)', color: 'var(--text-primary, inherit)', fontSize: '0.9rem' }} />
-              </div>
-              <div>
-                <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-primary, #475569)', display: 'block', marginBottom: '6px' }}>Manufacturer Brand Blueprint:</label>
-                <input type="text" value={editBrand} onChange={(e) => setEditBrand(e.target.value)} style={{ padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color, #cbd5e1)', width: '100%', outline: 'none', background: 'var(--bg-main, transparent)', color: 'var(--text-primary, inherit)', fontSize: '0.9rem' }} />
-              </div>
-            </div>
-          ) : (
-            <div>
-              <span style={{ background: 'rgba(59,130,246,0.1)', color: '#2563eb', padding: '6px 14px', borderRadius: '20px', fontSize: '0.75rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{product.category}</span>
-              <h1 style={{ fontSize: '2.5rem', margin: '14px 0 6px 0', fontWeight: '800', letterSpacing: '-0.03em', color: 'var(--text-primary, #0f172a)', lineHeight: '1.15' }}>{product.name}</h1>
-              <p style={{ margin: '0', color: 'var(--text-muted, #64748b)', fontSize: '1.1rem', fontWeight: '500' }}>Brand Blueprint: <strong style={{ color: 'var(--text-primary, #334155)', fontWeight: '600' }}>{product.brand}</strong></p>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '14px', color: '#ffc107', fontSize: '1.2rem' }}>
-                {"★".repeat(Math.round(product.averageRating || 5))}${"☆".repeat(5 - Math.round(product.averageRating || 5))}
-                <span style={{ color: 'var(--text-muted, #64748b)', fontSize: '0.875rem', fontWeight: '500', marginLeft: '4px' }}>({product.reviews?.length || 0} reviews)</span>
-              </div>
-            </div>
-          )}
-          <div style={{ display: 'flex', gap: '20px', padding: '24px', background: 'var(--bg-card, #ffffff)', border: '1px solid var(--border-color, #e2e8f0)', borderRadius: '16px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.01)' }}>
-            <div style={{ flex: 1 }}>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted, #64748b)', fontWeight: '700', letterSpacing: '0.05em', display: 'block' }}>UNIT COST</span>
-              {isEditMode ? (
-                <input type="number" value={editPrice} onChange={(e) => setEditPrice(e.target.value)} style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color, #cbd5e1)', width: '100%', marginTop: '8px', outline: 'none', background: 'var(--bg-main, transparent)', color: 'var(--text-primary, inherit)' }} />
-              ) : (
-                <div style={{ fontSize: '2.2rem', fontWeight: '800', color: '#10b981', marginTop: '6px', letterSpacing: '-0.02em' }}>${parseFloat(product.price).toFixed(2)}</div>
-              )}
-            </div>
-            <div style={{ flex: 1, borderLeft: '1px solid var(--border-color, #f1f5f9)', paddingLeft: '20px' }}>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted, #64748b)', fontWeight: '700', letterSpacing: '0.05em', display: 'block' }}>STOCK CORES</span>
-              {isEditMode ? (
-                <input type="number" value={editQuantity} onChange={(e) => setEditQuantity(e.target.value)} style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color, #cbd5e1)', width: '100%', marginTop: '8px', outline: 'none', background: 'var(--bg-main, transparent)', color: 'var(--text-primary, inherit)' }} />
-              ) : (
-                <div style={{ fontSize: '2.2rem', fontWeight: '800', marginTop: '6px', color: 'var(--text-primary, #1e293b)', letterSpacing: '-0.02em' }}>{product.quantity} <span style={{ fontSize: '1.1rem', fontWeight: '500', color: 'var(--text-muted, #64748b)' }}>units</span></div>
-              )}
-            </div>
-          </div>
-
-          <div style={{ padding: '24px', background: 'var(--bg-card, #ffffff)', border: '1px solid var(--border-color, #e2e8f0)', borderRadius: '16px', fontSize: '0.9rem', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.01)' }}>
-            <h3 style={{ margin: '0 0 4px 0', fontSize: '0.75rem', color: 'var(--text-muted, #64748b)', fontWeight: '700', letterSpacing: '0.05em' }}>RETAILER LOGISTICS ACCOUNT</h3>
-            <p style={{ margin: '0', color: 'var(--text-primary, #475569)' }}><strong>Listed Operator:</strong> <span style={{ color: 'var(--text-primary, #0f172a)', fontWeight: '600' }}>{product.createdBy?.username || "Authorized Merchant Partner"}</span></p>
-            <div>
-              <label style={{ fontWeight: '600', fontSize: '0.85rem', color: 'var(--text-primary, #475569)', display: 'block', marginBottom: '4px' }}>Contractual Security Guarantee:</label>
-              {isEditMode ? (
-                <input type="text" value={editWarranty} onChange={(e) => setEditWarranty(e.target.value)} style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color, #cbd5e1)', width: '100%', outline: 'none', background: 'var(--bg-main, transparent)', color: 'var(--text-primary, inherit)' }} />
-              ) : (
-                <p style={{ margin: '0', color: 'var(--text-primary, #0f172a)', fontWeight: '500' }}>{product.warranty || "Standard 1-Year Baseline Coverage"}</p>
-              )}
-            </div>
-            <div>
-              <label style={{ fontWeight: '600', fontSize: '0.85rem', color: 'var(--text-primary, #475569)', display: 'block', marginBottom: '4px' }}>Physical Condition Frame:</label>
-              {isEditMode ? (
-                <input type="text" value={editCondition} onChange={(e) => setEditCondition(e.target.value)} style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color, #cbd5e1)', width: '100%', outline: 'none', background: 'var(--bg-main, transparent)', color: 'var(--text-primary, inherit)' }} />
-              ) : (
-                <p style={{ margin: '0', color: 'var(--text-primary, #0f172a)', fontWeight: '500' }}>{product.condition || "Factory Sealed Box"}</p>
-              )}
-            </div>
-          </div>
-
-          {!isEditMode && (
-            <button onClick={() => { setOrderQuantity(1); setIsCheckoutOpen(true); }} onMouseEnter={() => setHoveredBtnId('buy_main')} onMouseLeave={() => setHoveredBtnId(null)} style={{ padding: '16px', background: hoveredBtnId === 'buy_main' ? '#059669' : '#10b981', color: '#ffffff', border: 'none', borderRadius: '12px', fontSize: '1.1rem', fontWeight: '700', cursor: 'pointer', transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)', transform: hoveredBtnId === 'buy_main' ? 'translateY(-2px)' : 'translateY(0)', boxShadow: hoveredBtnId === 'buy_main' ? '0 10px 15px -3px rgba(16,185,129,0.4)' : '0 4px 6px -1px rgba(16,185,129,0.15)' }} >
-              🚀 Initialize Purchase Sequence Order
-            </button>
-          )}
-        </div>
-      </div>
-      <div style={{ marginTop: '40px', background: 'var(--bg-card, #ffffff)', padding: '32px', borderRadius: '16px', border: '1px solid var(--border-color, #e2e8f0)', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)' }} className="purchase-specs-blueprint">
-        <h3 style={{ borderBottom: '2px solid var(--border-color, #f1f5f9)', paddingBottom: '14px', marginTop: '0', fontSize: '1.3rem', fontWeight: '700', color: 'var(--text-primary, #0f172a)', letterSpacing: '-0.02em' }}>Technical Specifications Blueprint</h3>
-        <label style={{ fontWeight: '600', fontSize: '0.85rem', color: 'var(--text-primary, #475569)', display: 'block', marginTop: '16px', marginBottom: '8px' }}>Detailed Product Summary Statement:</label>
-        {isEditMode ? (
-          <textarea value={editDescription} onChange={(e) => setEditDescription(e.target.value)} style={{ width: '100%', minHeight: '100px', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color, #cbd5e1)', boxSizing: 'border-box', marginBottom: '20px', outline: 'none', resize: 'vertical', background: 'var(--bg-main, transparent)', color: 'var(--text-primary, inherit)' }} />
-        ) : (
-          <p style={{ fontSize: '0.95rem', lineHeight: '1.6', color: 'var(--text-primary, #475569)', marginTop: '0', background: 'var(--bg-main, #f8fafc)', padding: '16px', borderRadius: '10px', border: '1px solid var(--border-color, #f1f5f9)' }}>{product.description || "No expanded blueprint technical metadata logged for this asset model label."}</p>
-        )}
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '20px', marginTop: '16px', fontSize: '0.9rem' }}>
-          <div style={{ padding: '16px', background: 'var(--bg-main, #f8fafc)', borderRadius: '10px', border: '1px solid var(--border-color, #e2e8f0)' }}>
-            <strong style={{ color: 'var(--text-primary, #475569)', display: 'block', marginBottom: '4px' }}>Dimensions Framework:</strong>
-            {isEditMode ? <input type="text" value={editDimensions} onChange={(e) => setEditDimensions(e.target.value)} style={{ width: '100%', marginTop: '4px', padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color, #cbd5e1)', background: 'var(--bg-card, transparent)', color: 'var(--text-primary, inherit)' }} /> : <span style={{ color: 'var(--text-primary, #0f172a)', fontWeight: '500' }}> {product.specifications?.dimensions || "Standard Size"}</span>}
-          </div>
-          <div style={{ padding: '16px', background: 'var(--bg-main, #f8fafc)', borderRadius: '10px', border: '1px solid var(--border-color, #e2e8f0)' }}>
-            <strong style={{ color: 'var(--text-primary, #475569)', display: 'block', marginBottom: '4px' }}>Gross Weight Metric:</strong>
-            {isEditMode ? <input type="text" value={editWeight} onChange={(e) => setEditWeight(e.target.value)} style={{ width: '100%', marginTop: '4px', padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color, #cbd5e1)', background: 'var(--bg-card, transparent)', color: 'var(--text-primary, inherit)' }} /> : <span style={{ color: 'var(--text-primary, #0f172a)', fontWeight: '500' }}> {product.specifications?.weight || "Standard Weight"}</span>}
-          </div>
-          <div style={{ padding: '16px', background: 'var(--bg-main, #f8fafc)', borderRadius: '10px', border: '1px solid var(--border-color, #e2e8f0)' }}>
-            <strong style={{ color: 'var(--text-primary, #475569)', display: 'block', marginBottom: '4px' }}>Power Drive Module:</strong>
-            {isEditMode ? <input type="text" value={editPowerSource} onChange={(e) => setEditPowerSource(e.target.value)} style={{ width: '100%', marginTop: '4px', padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color, #cbd5e1)', background: 'var(--bg-card, transparent)', color: 'var(--text-primary, inherit)' }} /> : <span style={{ color: 'var(--text-primary, #0f172a)', fontWeight: '500' }}> {product.specifications?.powerSource || "N/A"}</span>}
-          </div>
-        </div>
-
-        {isEditMode && (
-          <button disabled={saveSubmitting} onClick={async () => { try { setSaveSubmitting(true); const formData = new FormData(); formData.append('name', editName); formData.append('brand', editBrand); formData.append('quantity', Number(editQuantity)); formData.append('price', Number(editPrice)); formData.append('category', editCategory); formData.append('description', editDescription); formData.append('condition', editCondition); formData.append('warranty', editWarranty); formData.append('specifications[dimensions]', editDimensions); formData.append('specifications[weight]', editWeight); formData.append('specifications[powerSource]', editPowerSource); if (finalEditFile) { formData.append('productImage', finalEditFile); } const res = await fetch(`http://localhost:5000/inventory/${product._id || itemId}`, { method: 'PUT', headers: { 'Authorization': `Bearer ${token}` }, body: formData }); if (res.ok) { const updatedData = await res.json(); setProduct(updatedData); setIsEditMode(false); setFinalEditFile(null); setEditPreviewUrl(null); setSuccessMsg("Asset technical specifications modified cleanly!"); setIsSuccessOpen(true); } else { const errPayload = await res.json(); setSuccessMsg(`Update Fault: ${errPayload.error || "Operational breakdown."}`); setIsSuccessOpen(true); } } catch (err) { console.error(err); setSuccessMsg("Network connectivity failure executing update pipeline."); setIsSuccessOpen(true); } finally { setSaveSubmitting(false); } }} style={{ width: '100%', padding: '14px', marginTop: '24px', background: '#10b981', color: '#ffffff', border: 'none', borderRadius: '10px', cursor: 'pointer', fontWeight: '700', fontSize: '1rem', transition: 'all 0.2s' }} >
-            {saveSubmitting ? "Persisting Specifications..." : "Commit Technical Modifications"}
-          </button>
-        )}
-      </div>
-      {!isEditMode && (
-        <div style={{ marginTop: '40px' }} className="purchase-reviews-section">
-          <h3 style={{ marginBottom: '20px', fontSize: '1.3rem', fontWeight: '700', color: 'var(--text-primary, #0f172a)', letterSpacing: '-0.02em' }}>Customer Assessments Feed</h3>
-          <form onSubmit={async (e) => { e.preventDefault(); if (!userComment.trim()) return; try { setReviewSubmitting(true); const response = await fetch(`http://localhost:5000/inventory/${itemId}/review`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ rating: userRating, comment: userComment.trim() }) }); if (response.ok) { const refreshed = await response.json(); setProduct(refreshed); setUserComment(""); setUserRating(5); setSuccessMsg("Review logged into catalog ledger successfully!"); setIsSuccessOpen(true); } else { const errData = await response.json(); setSuccessMsg(`Server Error: ${errData.error || "Failed to log review."}`); setIsSuccessOpen(true); } } catch (err) { console.error(err); setSuccessMsg("Network pipeline failure connecting to server."); setIsSuccessOpen(true); } finally { setReviewSubmitting(false); } }} style={{ background: 'var(--bg-card, #ffffff)', padding: '24px', borderRadius: '16px', border: '1px solid var(--border-color, #e2e8f0)', marginBottom: '24px' }} >
-            <h4 style={{ margin: '0 0 16px 0', fontSize: '1rem', fontWeight: '600', color: 'var(--text-primary, #1e293b)' }}>Submit Performance Evaluation Log</h4>
-            <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', marginBottom: '20px' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '6px', fontWeight: '600', color: 'var(--text-primary, #475569)' }}>Assign Star Metric:</label>
-                <div style={{ display: 'flex', gap: '6px', alignItems: 'center', height: '40px' }}>
-                  {[1, 2, 3, 4, 5].map((star) => (
-                    <span key={star} onClick={() => setUserRating(star)} onMouseEnter={() => setHoverRating(star)} onMouseLeave={() => setHoverRating(0)} style={{ cursor: 'pointer', fontSize: '1.8rem', color: star <= (hoverRating || userRating) ? '#ffc107' : 'var(--border-color, #e2e8f0)', transition: 'color 0.1s' }}>★</span>
-                  ))}
-                </div>
-              </div>
-              <div style={{ flex: 1, minWidth: '280px' }}>
-                <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '6px', fontWeight: '600', color: 'var(--text-primary, #475569)' }}>Performance Review Commentary:</label>
-                <input type="text" value={userComment} onChange={(e) => setUserComment(e.target.value)} placeholder="Elaborate details detailing testing results, construction durability..." required style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color, #cbd5e1)', boxSizing: 'border-box', background: 'var(--bg-main, #ffffff)', color: 'var(--text-primary, #0f172a)', height: '40px', outline: 'none', fontSize: '0.9rem' }} />
-              </div>
-            </div>
-            <button type="submit" disabled={reviewSubmitting} style={{ padding: '12px 24px', background: '#3b82f6', color: '#ffffff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '0.875rem' }}>
-              {reviewSubmitting ? "Submitting Track Record..." : "Publish Customer Evaluation"}
-            </button>
-          </form>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }} className="reviews-feed-container">
-            {(!product.reviews || product.reviews.length === 0) ? (
-              <p style={{ fontStyle: 'italic', color: 'var(--text-muted, #64748b)', margin: '10px 0', fontSize: '0.9rem' }}>No performance evaluation metrics logged yet.</p>
+      <section className="product-detail-layout">
+        <div className="product-gallery-card">
+          <div className="product-gallery-canvas">
+            {activeMedia ? activeMedia.type === 'video' ? (
+              <video key={activeMedia.url} src={activeMedia.staged ? activeMedia.url : mediaUrl(activeMedia.url)} controls playsInline preload="metadata" />
             ) : (
-              product.reviews.map((rev) => (
-                <div key={rev._id || Math.random()} style={{ background: 'var(--bg-card, #ffffff)', border: '1px solid var(--border-color, #e2e8f0)', padding: '18px 24px', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.01)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <strong style={{ fontSize: '0.95rem', color: 'var(--text-primary, #1e293b)' }}>👤 {rev.username || "Anonymous Operator"}</strong>
-                    <span style={{ color: '#ffc107', fontSize: '0.95rem' }}>{"★".repeat(rev.rating)}{"☆".repeat(5 - rev.rating)}</span>
-                  </div>
-                  <p style={{ margin: '0', fontSize: '0.9rem', color: 'var(--text-primary, #475569)', lineHeight: '1.5' }}>{rev.comment}</p>
-                </div>
-              ))
-            )}
+              <img src={activeMedia.staged ? activeMedia.url : mediaUrl(activeMedia.url)} alt={`${product.name} media ${mediaIndex + 1}`} />
+            ) : <div className="product-empty-gallery"><span>✳</span><strong>See the product up close</strong><small>Seller photos and videos will appear here.</small></div>}
+            {gallery.length > 1 && <div className="product-gallery-arrows">
+              <button type="button" aria-label="Previous media" onClick={() => setMediaIndex(index => (index - 1 + gallery.length) % gallery.length)}>‹</button>
+              <span>{mediaIndex + 1} / {gallery.length}</span>
+              <button type="button" aria-label="Next media" onClick={() => setMediaIndex(index => (index + 1) % gallery.length)}>›</button>
+            </div>}
           </div>
+          {gallery.length > 0 && <div className="product-gallery-strip" aria-label="Product gallery">
+            {gallery.map((item, index) => <div className="product-gallery-tile-wrap" key={`${item.url}-${index}`}>
+              <button type="button" className={`product-gallery-tile ${index === mediaIndex ? 'is-selected' : ''}`} onClick={() => setMediaIndex(index)} aria-label={`Show media ${index + 1}`}>
+                {item.type === 'video' ? <span><Play size={16} fill="currentColor" /> Video</span> : <img src={item.staged ? item.url : mediaUrl(item.url)} alt="" />}
+              </button>
+              {isEditMode && !item.staged && <button type="button" className="product-media-remove" aria-label="Remove media" onClick={() => { setKeptMedia(current => current.filter((_, mediaPosition) => mediaPosition !== index)); setMediaIndex(0); }}>×</button>}
+            </div>)}
+          </div>}
+          {isEditMode && <label className="product-media-picker"><span>Add product photos or videos</span><input type="file" accept="image/*,video/*" multiple onChange={event => { setNewFiles(current => [...current, ...Array.from(event.target.files || [])].slice(0, 10)); event.target.value = ''; }} /><small>Select up to 10 new files. Images and videos are both supported.</small>
+            {filePreviews.map((item, index) => <button key={item.url} type="button" onClick={event => { event.preventDefault(); setNewFiles(current => current.filter((_, fileIndex) => fileIndex !== index)); }}>Remove {item.name}</button>)}
+          </label>}
         </div>
-      )}
 
-      <ImageUploadCrop isOpen={isEditCropOpen} onClose={() => setIsEditCropOpen(false)} onCropComplete={handleCroppedEditReturn} title="Modify Existing Product Image" aspect={1} />
-      <PurchaseInvoiceModal isOpen={isCheckoutOpen} onClose={() => setIsCheckoutOpen(false)} product={product} onCompletePurchase={handleCompletePurchase} />
-      <DeleteModal deleteTargetId={deleteTargetId} setDeleteTargetId={setDeleteTargetId} handleConfirmDelete={async () => { try { const res = await fetch(`http://localhost:5000/inventory/${deleteTargetId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } }); if (res.ok) { setDeleteTargetId(null); setSuccessMsg("Product item records dropped securely."); setIsSuccessOpen(true); setTimeout(() => { onBack(); }, 2000); } else { const errorPayload = await res.json(); setSuccessMsg(`Purge Fault: ${errorPayload.error || "Server validation anomaly."}`); setIsSuccessOpen(true); } } catch (err) { console.error(err); setSuccessMsg("Network failure handling deletion stream macros."); setIsSuccessOpen(true); } }} />
+        <aside className="product-buy-panel">
+          <div className="product-title-area">
+            <span className="product-category-pill">{product.category || 'Product'}</span>
+            {isEditMode ? <div className="product-edit-grid"><label>Product name<input value={editName} onChange={event => setEditName(event.target.value)} /></label><label>Brand<input value={editBrand} onChange={event => setEditBrand(event.target.value)} /></label></div> : <><h1>{product.name}</h1><p className="product-brand-line">by <strong>{product.brand}</strong></p></>}
+            <div className="product-rating-line"><span className="product-stars">{'★'.repeat(Math.round(average))}{'☆'.repeat(5 - Math.round(average))}</span><span>{average ? average.toFixed(1) : 'New'} · {reviewCount} {reviewCount === 1 ? 'review' : 'reviews'}</span></div>
+          </div>
+
+          {!hasSellerAccount && <div className="product-seller-missing" role="status">
+            <strong>Seller account needed</strong>
+            <span>This older listing is missing its seller link, so buyers cannot order or message its owner yet.</span>
+            {user?.role === 'admin' && <small>Assign it to your admin account above to restore ordering and seller chat.</small>}
+          </div>}
+
+          {isEditMode ? <div className="product-edit-grid product-edit-pricing">
+            <label>Price<input type="number" min="0" step="0.01" value={editPrice} onChange={event => setEditPrice(event.target.value)} /></label>
+            <label>Available quantity<input type="number" min="0" value={editQuantity} onChange={event => setEditQuantity(event.target.value)} /></label>
+            <label>Category<select value={editCategory} onChange={event => setEditCategory(event.target.value)}><option value="tools">Tools</option><option value="hardware">Hardware</option><option value="machinery">Machinery</option></select></label>
+          </div> : <div className="product-price-stock"><div><span>Price</span><strong>${Number(product.price || 0).toFixed(2)}</strong></div><div className="product-stock-status"><PackageCheck size={17} /><span>{Number(product.quantity) > 0 ? `${product.quantity} available` : 'Currently unavailable'}</span></div></div>}
+
+          <div className="product-purchase-actions">
+            {!canManage && <>
+              <label className="product-quantity">Qty<select value={quantity} onChange={event => setQuantity(Number(event.target.value))} disabled={!Number(product.quantity)}>{Array.from({ length: Math.min(10, Math.max(1, Number(product.quantity))) }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</select></label>
+              <button type="button" className="product-order-button" disabled={!Number(product.quantity) || !hasSellerAccount} onClick={() => { setCheckoutError(''); setOrderQuantity(quantity); setIsCheckoutOpen(true); }}>{!hasSellerAccount ? 'Seller unavailable' : Number(product.quantity) ? 'Request to buy' : 'Out of stock'}</button>
+              <button type="button" className="product-chat-button" disabled={!hasSellerAccount} onClick={openSellerChat}><MessageCircle size={17} /> Chat with seller</button>
+            </>}
+            {isEditMode && <button type="button" className="product-order-button" disabled={saveSubmitting} onClick={saveListing}>{saveSubmitting ? 'Saving…' : 'Save listing'}</button>}
+          </div>
+
+          <div className="product-trust-row"><span><ShieldCheck size={16} /> Seller listing</span><span><PackageCheck size={16} /> Stock checked</span></div>
+          <div className="product-seller-card"><UserAvatar person={product.createdBy} className="product-seller-avatar" /><div><small>Sold by</small><strong>{product.createdBy?.username || 'Marketplace seller'}</strong><span>{product.condition || 'Condition not specified'}</span></div></div>
+        </aside>
+      </section>
+
+      <section className="product-information-card">
+        <div className="product-section-heading"><div><span>PRODUCT INFORMATION</span><h2>Details that help you decide</h2></div></div>
+        {isEditMode ? <label className="product-description-edit">Description<textarea rows={5} value={editDescription} onChange={event => setEditDescription(event.target.value)} /></label> : <p className="product-description">{product.description || 'The seller has not added a description yet.'}</p>}
+        <div className="product-spec-grid">
+          {[
+            ['Condition', editCondition, setEditCondition, product.condition || 'Not specified'],
+            ['Warranty', editWarranty, setEditWarranty, product.warranty || 'Not specified'],
+            ['Dimensions', editDimensions, setEditDimensions, product.specifications?.dimensions || 'Not specified'],
+            ['Weight', editWeight, setEditWeight, product.specifications?.weight || 'Not specified'],
+            ['Power source', editPowerSource, setEditPowerSource, product.specifications?.powerSource || 'Not specified']
+          ].map(([label, value, setter, display]) => <div className="product-spec-item" key={label}><span>{label}</span>{isEditMode ? <input value={value} onChange={event => setter(event.target.value)} /> : <strong>{display}</strong>}</div>)}
+        </div>
+      </section>
+
+      <section className="product-reviews-section">
+        <div className="product-section-heading"><div><span>COMMUNITY FEEDBACK</span><h2>Customer reviews</h2></div><div className="product-review-summary"><Star size={17} fill="currentColor" /> {average ? average.toFixed(1) : '—'} <small>({reviewCount})</small></div></div>
+        {!canManage && !hasReviewed && <form className="product-review-form" onSubmit={submitReview}>
+          <div><span className="product-review-label">Your rating</span><div className="product-review-stars">{[1, 2, 3, 4, 5].map(star => <button key={star} type="button" aria-label={`${star} stars`} onClick={() => setUserRating(star)} onMouseEnter={() => setHoverRating(star)} onMouseLeave={() => setHoverRating(0)} className={star <= (hoverRating || userRating) ? 'is-on' : ''}>★</button>)}</div></div>
+          <label className="product-review-input">Your review<input value={userComment} onChange={event => setUserComment(event.target.value)} placeholder="What should other buyers know?" required /></label>
+          <button type="submit" disabled={reviewSubmitting}>{reviewSubmitting ? 'Posting…' : 'Post review'}</button>
+        </form>}
+        {hasReviewed && <p className="product-no-reviews">You have already reviewed this listing.</p>}
+        <div className="product-review-list">{product.reviews?.length ? product.reviews.map((review, index) => <article className="product-review" key={review._id || `${review.username}-${index}`}><div className="product-review-byline"><strong>{review.username || 'Buyer'}</strong><span className="product-stars">{'★'.repeat(review.rating)}{'☆'.repeat(5 - review.rating)}</span></div><p>{review.comment}</p></article>) : <div className="product-no-reviews">No reviews yet. Be the first to share your experience.</div>}</div>
+      </section>
+
+      <PurchaseInvoiceModal isOpen={isCheckoutOpen} onClose={() => setIsCheckoutOpen(false)} product={product} user={user} initialQuantity={quantity} checkoutError={checkoutError} onCompletePurchase={handleCompletePurchase} isSubmitting={purchaseSubmitting} />
+      <DeleteModal deleteTargetId={deleteTargetId} setDeleteTargetId={setDeleteTargetId} handleConfirmDelete={async () => {
+        try {
+          const response = await fetch(`${API_BASE_URL}/inventory/${deleteTargetId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || 'Could not remove listing.');
+          setDeleteTargetId(null); setSuccessMsg('Listing removed.'); setIsSuccessOpen(true); setTimeout(handleBack, 900);
+        } catch (deleteError) { setSuccessMsg(deleteError.message || 'Could not remove listing.'); setIsSuccessOpen(true); }
+      }} />
       <SuccessModal isOpen={isSuccessOpen} message={successMsg} onClose={() => setIsSuccessOpen(false)} />
-    </div>
+      {!onOpenSellerChat && <LiveChatDrawer socket={socket} user={user} chatRequest={chatRequest} onChatRequestHandled={() => setChatRequest(null)} />}
+    </main>
   );
 }
 

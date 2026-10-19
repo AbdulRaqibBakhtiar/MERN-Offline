@@ -1,15 +1,15 @@
+import { API_BASE_URL } from '../api/config';
 // utils/avatar.js
 
 export const getAvatarUrl = (profileImage) => {
-    if (!profileImage) return null;
+    if (typeof profileImage !== 'string' || !profileImage.trim()) return null;
+    const image = profileImage.trim();
 
     if (
-        profileImage.startsWith("http://") ||
-        profileImage.startsWith("https://") ||
-        profileImage.startsWith("data:")
+        /^(https?:|data:|blob:)/i.test(image)
     ) {
-        return profileImage;
+        return image;
     }
 
-    return `http://localhost:5000${profileImage}`;
+    return `${API_BASE_URL}${image.startsWith('/') ? image : `/${image}`}`;
 };

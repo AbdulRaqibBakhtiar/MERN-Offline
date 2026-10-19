@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { MessageSquare, Circle, Users, User, X, Trash2 } from 'lucide-react';
+import { MessageSquare, Circle, Users, X, Trash2, PhoneCall } from 'lucide-react';
+import { API_BASE_URL } from '../../api/config';
 import { useLiveChat } from '../../hooks/useLiveChat';
 import { ChatHeader } from './LiveChatComponents/ChatHeader';
 import { CallOverlay } from './LiveChatComponents/CallOverlay';
@@ -9,16 +10,42 @@ import { ChatInputForm } from './LiveChatComponents/ChatInputForm';
 import { ChannelsHub } from './LiveChatComponents/ChannelsHub';
 import { BuiltInNotification } from '../Layout/BuiltInNotification';
 import { MediaLightbox } from '../Layout/MediaLightbox';
+import MarketplaceChatPanel from './MarketplaceChatPanel';
+import CallHistoryPanel from './CallHistoryPanel';
 
-export const LiveChatDrawer = ({ socket, user }) => {
+export const LiveChatDrawer = ({ socket, user, chatRequest, onChatRequestHandled }) => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [recentChatMenuCoords, setRecentChatMenuCoords] = useState(null);
   const [targetActiveConversationId, setTargetActiveConversationId] = useState(null);
+  const [messagingSection, setMessagingSection] = useState('workspace');
+  const handledChatRequestRef = useRef(null);
 
   const chatProps = useLiveChat(socket, user);
   const toast = chatProps?.toast || { show: false };
   const globalUnreadCounter = chatProps.recentChatsList?.reduce((sum, item) => sum + (item.unreadCount || 0), 0) || 0;
   const priorUnreadRef = useRef(globalUnreadCounter);
+
+  useEffect(() => {
+    const vendor = chatRequest?.vendor;
+    const vendorId = typeof vendor === 'string' ? vendor : vendor?._id || vendor?.id;
+    if (!vendorId || !chatProps?.navigateToRoom || handledChatRequestRef.current === chatRequest.requestId) return;
+    handledChatRequestRef.current = chatRequest.requestId;
+    const targetId = String(vendorId);
+    if (targetId === String(user?._id || user?.id)) {
+      onChatRequestHandled?.();
+      return;
+    }
+    setMessagingSection('workspace');
+    chatProps.setIsOpen(true);
+    chatProps.navigateToRoom({
+      type: 'peer',
+      id: targetId,
+      name: typeof vendor === 'object' ? vendor.username || 'Seller' : 'Seller',
+      avatar: typeof vendor === 'object' ? vendor.profileImage || null : null
+    });
+    chatProps.setMessage(`Hi, I'm interested in ${chatRequest.product?.name || 'your product'}. Is it still available?`);
+    onChatRequestHandled?.();
+  }, [chatRequest, chatProps, user?._id, user?.id, onChatRequestHandled]);
 
   // 🚀 BACKGROUND MONITOR: Notification tab updater and chime synchronization engine
   useEffect(() => {
@@ -77,7 +104,7 @@ export const LiveChatDrawer = ({ socket, user }) => {
     if (imgField.startsWith('http://') || imgField.startsWith('https://') || imgField.startsWith('data:')) {
       return imgField;
     }
-    const backendHost = "http://localhost:5000";
+    const backendHost = API_BASE_URL;
     let cleanPath = imgField.replace(/\\/g, '/');
     while (cleanPath.startsWith('/')) {
       cleanPath = cleanPath.substring(1);
@@ -101,10 +128,31 @@ export const LiveChatDrawer = ({ socket, user }) => {
           <BuiltInNotification visible={toast.show} message={toast.message} type={toast.type} onClose={() => chatProps.setToast && chatProps.setToast({ show: false, message: '', type: 'info' })} />
           <MediaLightbox isOpen={chatProps.lightboxState?.open} mediaUrl={chatProps.lightboxState?.url} mediaType={chatProps.lightboxState?.type} onClose={() => chatProps.setLightboxState && chatProps.setLightboxState({ open: false, url: '', type: 'image' })} />
 
-          {chatProps.currentRoom ? (
+          <nav className="chat-mode-switcher" aria-label="Chat area">
+            <button type="button" className={messagingSection === 'workspace' ? 'is-active' : ''} onClick={() => setMessagingSection('workspace')}>Workspace chat</button>
+            <button type="button" className={messagingSection === 'marketplace' ? 'is-active' : ''} onClick={() => setMessagingSection('marketplace')}>Marketplace sellers</button>
+            <button type="button" className={messagingSection === 'calls' ? 'is-active' : ''} onClick={() => setMessagingSection('calls')}><PhoneCall size={13} /> Calls</button>
+          </nav>
+
+          {chatProps.callState && chatProps.callState !== 'idle' && <CallOverlay chatProps={{ ...chatProps, user }} />}
+
+          {messagingSection === 'marketplace' ? (
+            <MarketplaceChatPanel
+              socket={socket}
+              user={user}
+              chatProps={chatProps}
+              onSelectVendor={(vendor, product) => {
+                setMessagingSection('workspace');
+                chatProps.navigateToRoom({ type: 'peer', id: String(vendor._id), name: vendor.username || 'Seller', avatar: vendor.profileImage || null });
+                chatProps.setMessage(product ? `Hi, I'm interested in ${product.name}. Is it still available?` : 'Hi, I would like to ask about your listings.');
+              }}
+              onOpenWorkspaceChat={item => { setMessagingSection('workspace'); chatProps.navigateToRoom(item); }}
+            />
+          ) : messagingSection === 'calls' ? (
+            <CallHistoryPanel socket={socket} user={user} onOpenConversation={item => { setMessagingSection('workspace'); chatProps.navigateToRoom(item); }} />
+          ) : chatProps.currentRoom ? (
             <>
               <ChatHeader chatProps={{ ...chatProps, isHeaderGlassRef: isScrolled }} resolveDrawerImgUrl={resolveDrawerImgUrl} />
-              {chatProps.callState && chatProps.callState !== 'idle' && (<CallOverlay chatProps={chatProps} />)}
               <div onScroll={handleFeedScrollCheck} style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', position: 'relative' }}>
                 <MessagesFeed chatProps={chatProps} user={user} resolveDrawerImgUrl={resolveDrawerImgUrl} />
               </div>

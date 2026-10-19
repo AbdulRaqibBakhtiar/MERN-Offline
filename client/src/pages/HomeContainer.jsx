@@ -1,36 +1,31 @@
 // src/pages/HomeContainer.jsx
-import React from 'react';
+import React, { useState } from 'react';
 import HomePage from './HomePage';
 import InventoryPage from './InventoryPage';
 import ProfilePage from './ProfilePage';
-import SettingsPage from './SettingsPage';
+import AboutPage from './AboutPage';
 import ProductPurchasePage from './ProductPurchasePage';
+import ArticlesPage from './ArticlesPage';
 import DeleteModal from '../components/Modal/DeleteModal';
 
 // Shared Context Hooks & Sub-Modules
-import useMetrics from '../hooks/useMetrics';
 import { useAuth } from '../context/AuthContext';
-import { useSocket } from '../context/SocketContext'; // 🔌 Injects socket connection data layer
+import { useSocket } from '../context/SocketContext';
 import { useInventory } from '../hooks/useInventory';
 import { useContainerData } from '../hooks/useContainerData';
 import { useHomeData } from '../hooks/useHomeData';
 
 import ContainerHeader from '../components/Navigation/ContainerHeader';
 import DashboardFooter from '../components/Navigation/DashboardFooter';
-import { LiveChatDrawer } from '../components/Dashboard/LiveChatDrawer'; // 💬 Injects layout chat
+import { LiveChatDrawer } from '../components/Dashboard/LiveChatDrawer';
 
 const HomeContainer = ({ theme, setTheme }) => {
     const { user, logout, token } = useAuth();
-    const socketContext = useSocket();
-
-    console.log("FULL SOCKET CONTEXT:", socketContext);
-
-    const { socket } = socketContext;
-
-    console.log("EXTRACTED SOCKET:", socket);
-    console.log("SOCKET ON FUNCTION:", socket?.on);
+    const { socket } = useSocket();
+    const [chatRequest, setChatRequest] = useState(null);
+    const [articleSearchQuery, setArticleSearchQuery] = useState('');
     const inventory = useInventory();
-    const { metricHistory, createSnapshot, metricLoading, snapshotStatus } = useMetrics();
+    const [marketplaceInitialView, setMarketplaceInitialView] = useState('browse');
     const {
         activeTab,
         setActiveTab,
@@ -51,10 +46,7 @@ const HomeContainer = ({ theme, setTheme }) => {
         triggerToggleWishlist,
         handleCloseNotice,
         triggerSaveEdit,
-        triggerConfirmDelete,
-        deleteTargetId,
-        setDeleteTargetId,
-        openDeleteModal
+        triggerConfirmDelete
     } = useContainerData({ token, inventory });
 
     const homeData = useHomeData({
@@ -83,7 +75,12 @@ const HomeContainer = ({ theme, setTheme }) => {
                 setSearchOpen={setSearchOpen}
                 globalSearchQuery={globalSearchQuery}
                 setGlobalSearchQuery={setGlobalSearchQuery}
+                setInventorySearchQuery={setInventorySearchQuery}
+                setSearchCategory={setSearchCategory}
+                setArticleSearchQuery={setArticleSearchQuery}
                 user={user}
+                theme={theme}
+                setTheme={setTheme}
                 showProfile={showProfile}
                 setShowProfile={setShowProfile}
                 wishlist={wishlist}
@@ -91,18 +88,19 @@ const HomeContainer = ({ theme, setTheme }) => {
                 logout={logout}
                 rawInventoryItems={Array.isArray(inventory.itemList) ? inventory.itemList : []}
                 rawNewsItems={homeData.liveNews || []}
+                rawAdItems={homeData.liveAd || []}
             />
 
-            <main className="main-viewport" style={{ flex: 1, padding: '24px' }}>
+            <main className="main-viewport" style={{ flex: 1, padding: activeTab === 'purchase_item' ? '8px 24px 24px' : '24px' }}>
                 <div className="content-container" style={{ maxWidth: '1200px', margin: '0 auto' }}>
                     {activeTab === 'home' && (
                         <div className="fade-in">
                             <HomePage
+                                user={user}
+                                setActiveTab={setActiveTab}
+                                setMarketplaceInitialView={setMarketplaceInitialView}
                                 itemList={Array.isArray(inventory.itemList) ? inventory.itemList : []}
-                                metricHistory={metricHistory}
-                                createSnapshot={createSnapshot}
-                                metricLoading={metricLoading}
-                                snapshotStatus={snapshotStatus}
+                                isAdmin={user?.role === 'admin'}
                                 openDeleteModal={inventory.openDeleteModal}
                                 deleteTargetId={inventory.deleteTargetId}
                                 setDeleteTargetId={inventory.setDeleteTargetId}
@@ -116,14 +114,18 @@ const HomeContainer = ({ theme, setTheme }) => {
                         </div>
                     )}
 
+                    {activeTab === 'articles' && <div className="fade-in"><ArticlesPage user={user} searchQuery={articleSearchQuery} onClearSearch={() => setArticleSearchQuery('')} /></div>}
+
                     {activeTab === 'items' && (
                         <div className="fade-in">
                             <InventoryPage
                                 inventory={activeFilteredInventory}
+                                user={user}
                                 searchQuery={inventorySearchQuery}
                                 setSearchQuery={setInventorySearchQuery}
                                 searchCategory={searchCategory}
                                 setSearchCategory={setSearchCategory}
+                                initialView={marketplaceInitialView}
                                 wishlist={wishlist}
                                 onToggleWishlist={triggerToggleWishlist}
                                 onBuyNow={(itemId) => { setSelectedPurchaseId(itemId); setActiveTab('purchase_item'); }}
@@ -143,20 +145,18 @@ const HomeContainer = ({ theme, setTheme }) => {
                         </div>
                     )}
 
-                    {activeTab === 'settings' && (
-                        <div className="fade-in" style={{ margin: '1.5rem' }}>
-                            <SettingsPage theme={theme} setTheme={setTheme} />
-                        </div>
-                    )}
+                    {activeTab === 'about' && <div className="fade-in"><AboutPage /></div>}
 
                     {activeTab === 'purchase_item' && (
                         <div className="fade-in">
-                            <ProductPurchasePage itemId={selectedPurchaseId} onBack={() => setActiveTab('items')} />
+                            <ProductPurchasePage itemId={selectedPurchaseId} onBack={() => setActiveTab('items')} onOpenSellerChat={request => setChatRequest({ ...request, requestId: Date.now() })} />
                         </div>
                     )}
                 </div>
             </main>
             <DashboardFooter />
+
+            <LiveChatDrawer socket={socket} user={user} chatRequest={chatRequest} onChatRequestHandled={() => setChatRequest(null)} />
 
             <DeleteModal
                 deleteTargetId={inventory.deleteTargetId}
@@ -173,9 +173,6 @@ const HomeContainer = ({ theme, setTheme }) => {
                     </div>
                 </div>
             )}
-
-            {/* 🎯 FLOATING COLLABORATIVE CHAT MODULE TRIGGER BLOCK */}
-            <LiveChatDrawer socket={socket} user={user} />
 
         </div>
     );

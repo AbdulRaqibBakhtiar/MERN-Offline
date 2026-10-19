@@ -1,13 +1,14 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 
 function LoginPage({ 
   username, setUsername, 
   password, setPassword, 
   confirmPassword, setConfirmPassword, 
   email, setEmail, 
-  firstName, setFirstName, 
-  lastName, setLastName, 
-  phoneNumber, setPhoneNumber, 
+  firstName, setFirstName,
+  lastName, setLastName,
+  phoneNumber, setPhoneNumber,
   authError, isLoginMode, setIsLoginMode, setAuthError, 
   handleAuthSubmit, successModal, handleCloseSuccessModal, 
   toast, closeToast 
@@ -32,54 +33,45 @@ function LoginPage({
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginBottom: '18px' }}>
           <span style={{ fontSize: '1.1rem', filter: 'drop-shadow(0 2px 4px rgba(37, 99, 235, 0.1))' }}>⚙️</span>
           <span style={{ fontSize: '0.72rem', fontWeight: '700', color: 'var(--text-muted, #475569)', letterSpacing: '1.8px', textTransform: 'uppercase' }}>
-            StockMaster Asset Network
+            Bazzar Marketplace
           </span>
         </div>
 
         <h1 style={{ textAlign: 'center', margin: '0 0 6px 0', fontSize: '1.75rem', fontWeight: '700', letterSpacing: '-0.5px', color: 'var(--text-primary, #0f172a)' }}>
-          {isLoginMode ? "Login Portal" : "Create Account"}
+          {isLoginMode ? "Welcome back" : "Create your account"}
         </h1>
         <p style={{ fontSize: '0.85rem', color: 'var(--text-muted, #64748b)', textAlign: 'center', margin: '0 0 28px 0', lineHeight: '1.4' }}>
-          {isLoginMode ? "Secure Authorization Gateway Node." : "Password requires: 8+ characters, 1 capital, 1 number."}
+          {isLoginMode ? "Sign in to continue to Bazzar." : "Create your account to buy and sell on Bazzar."}
         </p>
 
         <form onSubmit={handleAuthSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div>
             <label className="auth-input-label">Username</label>
-            <input type='text' placeholder='Enter username' value={username} onChange={(e) => setUsername(e.target.value)} className="shiny-input" required />
+            <input type='text' autoComplete="username" placeholder='Enter username' value={username} onChange={(e) => setUsername(e.target.value)} className="shiny-input" required />
           </div>
 
           {!isLoginMode && (
             <React.Fragment>
               <div>
                 <label className="auth-input-label">Email Address</label>
-                <input type='email' placeholder='name@domain.com' value={email} onChange={(e) => setEmail(e.target.value)} className="shiny-input" required={!isLoginMode} />
+                <input type='email' autoComplete="email" placeholder='name@domain.com' value={email} onChange={(e) => setEmail(e.target.value)} className="shiny-input" required />
               </div>
               <div style={{ display: 'flex', gap: '12px', width: '100%' }}>
-                <div style={{ flex: 1 }}>
-                  <label className="auth-input-label">First Name</label>
-                  <input type='text' placeholder='John' value={firstName} onChange={(e) => setFirstName(e.target.value)} className="shiny-input" />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label className="auth-input-label">Last Name</label>
-                  <input type='text' placeholder='Doe' value={lastName} onChange={(e) => setLastName(e.target.value)} className="shiny-input" />
-                </div>
+                <div style={{ flex: 1 }}><label className="auth-input-label">First name</label><input type="text" autoComplete="given-name" placeholder="First name" value={firstName} onChange={event => setFirstName(event.target.value)} className="shiny-input" /></div>
+                <div style={{ flex: 1 }}><label className="auth-input-label">Last name</label><input type="text" autoComplete="family-name" placeholder="Last name" value={lastName} onChange={event => setLastName(event.target.value)} className="shiny-input" /></div>
               </div>
-              <div>
-                <label className="auth-input-label">Phone Number</label>
-                <input type='tel' placeholder='+1 (555) 000-0000' value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} className="shiny-input" />
-              </div>
+              <div><label className="auth-input-label">Phone number <span className="auth-field-optional">Optional</span></label><input type="tel" autoComplete="tel" placeholder="Phone number" value={phoneNumber} onChange={event => setPhoneNumber(event.target.value)} className="shiny-input" /></div>
             </React.Fragment>
           )}
           <div>
             <label className="auth-input-label">Password</label>
-            <input type='password' placeholder='Enter password' value={password} onChange={(e) => setPassword(e.target.value)} className="shiny-input" required />
+            <input type='password' autoComplete={isLoginMode ? 'current-password' : 'new-password'} placeholder='Enter password' value={password} onChange={(e) => setPassword(e.target.value)} className="shiny-input" required />
           </div>
 
           {!isLoginMode && (
             <div>
               <label className="auth-input-label">Confirm Password</label>
-              <input type='password' placeholder='Repeat password' value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className={`shiny-input ${password && confirmPassword && password !== confirmPassword ? 'shiny-input-error' : ''}`} required={!isLoginMode} />
+              <input type='password' autoComplete="new-password" placeholder='Repeat password' value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className={`shiny-input ${password && confirmPassword && password !== confirmPassword ? 'shiny-input-error' : ''}`} required />
             </div>
           )}
 
@@ -90,8 +82,9 @@ function LoginPage({
           )}
 
           <button type="submit" className="neon-btn" style={{ background: isLoginMode ? '#2563eb' : '#10b981', width: '100%' }}>
-            {isLoginMode ? "Sign In" : "Create Account"}
+            {isLoginMode ? "Sign In" : "Create account"}
           </button>
+          {isLoginMode && <Link to="/forgot-password" className="auth-recovery-link">Forgot your password?</Link>}
         </form>
 
         <p style={{ marginTop: '24px', textAlign: 'center', fontSize: '0.88rem', color: 'var(--text-muted, #64748b)' }}>

@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
 import { useAuth } from './AuthContext';
+import { API_BASE_URL } from '../api/config';
 
 const SocketContext = createContext(null);
 
@@ -20,13 +21,10 @@ export const SocketProvider = ({ children }) => {
 
     console.log("🛰️ Connecting to backend collaborative real-time server cluster...");
 
-    const socketConnection = io('http://localhost:5000', {
+    const socketConnection = io(API_BASE_URL, {
       transports: ['websocket'],
       autoConnect: true,
-      auth: {
-        userId: user?._id,
-        username: user?.name
-      }
+      auth: { token }
     });
     setSocket(socketConnection);
 

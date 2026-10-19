@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../../api/config';
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import ImageUploadCrop from './ImageUploadCrop'; // 🔌 Connecting your active crop modal module here
@@ -14,7 +15,7 @@ function SoftwareManageModal({ isOpen, onClose, activeApp, onSave, onDelete }) {
   useEffect(() => {
     if (activeApp) {
       setFormData(activeApp);
-      setPreviewUrl(activeApp.image ? `http://localhost:5000${activeApp.image}` : null);
+      setPreviewUrl(activeApp.image ? `${API_BASE_URL}${activeApp.image}` : null);
       setCroppedFile(null);
     } else {
       setFormData({ name: '', version: 'v1.0', description: '', downloadLink: '/404', slug: '' });

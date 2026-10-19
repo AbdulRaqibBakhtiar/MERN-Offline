@@ -47,7 +47,7 @@ function DashboardFooter() {
             ✉️ Dispatch Records
           </h5>
           <span style={{ fontSize: '0.85rem', color: 'var(--text-primary, #cbd5e1)', fontWeight: '600' }}>
-            support@stockmaster.domain
+            support@bazzar.example
           </span>
         </div>
 
@@ -72,7 +72,7 @@ function DashboardFooter() {
           color: 'var(--text-muted, #71717a)'
         }}
       >
-        &copy; {new Date().getFullYear()} StockMaster Inc. Secure Logistics Cluster. All rights reserved.
+        &copy; {new Date().getFullYear()} Bazzar. All rights reserved.
       </div>
     </footer>
   );

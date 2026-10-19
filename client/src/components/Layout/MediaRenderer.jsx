@@ -1,64 +1,36 @@
-import React, { useState } from "react";
-import { PremiumVideoPlayer } from "./PremiumVideoPlayer";
-import { ImagePreview } from "./ImagePreview";
+import React, { useState } from 'react';
+import { ImagePreview } from './ImagePreview';
+import { MediaViewer } from './MediaViewer';
+import { PremiumVideoPlayer } from './PremiumVideoPlayer';
 
 export const MediaRenderer = ({ msg, isMe }) => {
-  const [showPreview, setShowPreview] = useState(false);
-
+  const [videoOpen, setVideoOpen] = useState(false);
   if (!msg?.attachment) return null;
 
+  const bubbleRadius = isMe ? '16px 16px 4px 16px' : '16px 16px 16px 4px';
 
-  if (msg.type === "image") {
+  if (msg.type === 'image') {
     return (
-      <>
-        <img
-          src={msg.attachment}
-          alt="Attachment"
-          onClick={(e) => {
-            e.stopPropagation();
-            setShowPreview(true);
-          }}
-          style={{
-            width: "265px",
-            height: "265px",
-            objectFit: "cover",
-            display: "block",
-            cursor: "zoom-in",
-            borderRadius: isMe
-              ? "16px 16px 4px 16px"
-              : "16px 16px 16px 4px"
-          }}
-        />
-
-        {showPreview && (
-          <ImagePreview
-            src={msg.attachment}
-            onClose={() => setShowPreview(false)}
-          />
-        )}
-      </>
-    );
-  }
-
-
-  if (msg.type === "video") {
-    return (
-      <div
-        style={{
-          width: "265px",
-          height: "265px",
-          overflow: "hidden",
-          borderRadius: isMe
-            ? "16px 16px 4px 16px"
-            : "16px 16px 16px 4px",
-          background: "#000"
-        }}
-      >
-        <PremiumVideoPlayer src={msg.attachment} />
+      <div style={{ width: 265, height: 265, overflow: 'hidden', borderRadius: bubbleRadius }}>
+        <ImagePreview src={msg.attachment} alt={msg.message || 'Image attachment'} />
       </div>
     );
   }
 
+  if (msg.type === 'video') {
+    return (
+      <>
+        <div style={{ width: 265, height: 265, overflow: 'hidden', borderRadius: bubbleRadius }}>
+          <PremiumVideoPlayer src={msg.attachment} isPreview onClick={() => setVideoOpen(true)} title={msg.message || 'Video attachment'} />
+        </div>
+        <MediaViewer
+          isOpen={videoOpen}
+          media={[{ url: msg.attachment, type: 'video', title: msg.message || 'Video attachment' }]}
+          onClose={() => setVideoOpen(false)}
+        />
+      </>
+    );
+  }
 
   return null;
 };

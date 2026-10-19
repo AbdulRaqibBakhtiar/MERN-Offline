@@ -2,13 +2,11 @@
 // USE CONTAINER DATA HOOK - PART 1 OF 2      //
 // ========================================== //
 import { useState, useEffect } from 'react'; 
+import { API_BASE_URL } from '../api/config';
 
 // 🚀 FIXED: Declaring this outside the hook ensures it is a static reference 
 // that never triggers React rendering dependency size mutations!
-const activeHostname = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-const BASE_URL = (activeHostname === 'localhost' || activeHostname === '127.0.0.1')
-  ? 'http://localhost:5000'
-  : `http://${activeHostname}:5000`;
+const BASE_URL = API_BASE_URL;
 
 export function useContainerData({ token, inventory }) { 
   // 1. CONFIGURATION STATES 

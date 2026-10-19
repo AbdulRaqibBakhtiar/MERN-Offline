@@ -3,19 +3,11 @@ import axios from 'axios';
 import React from 'react';
 import { useChatMedia } from './useChatMedia';
 import { useMessageReply } from './useMessageReply';
+import { API_BASE_URL } from '../api/config';
 
 const REACTION_OPTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
-const activeHostname =
-  typeof window !== 'undefined'
-    ? window.location.hostname
-    : 'localhost';
-
-const BASE_URL =
-  activeHostname === 'localhost' ||
-    activeHostname === '127.0.0.1'
-    ? 'http://localhost:5000'
-    : `http://${activeHostname}:5000`;
+const BASE_URL = API_BASE_URL;
 
 export const useLiveChat = (socket, user) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -115,6 +107,10 @@ export const useLiveChat = (socket, user) => {
     getOrCreatePeerConnection,
     clearCallSessionState,
     peerConnectionRef,
+    peerConnectionsRef,
+    setCallParticipants,
+    setRemoteStreams,
+    setIsConferenceCall,
     endCallSession
   } = mediaProps;
 
@@ -531,7 +527,7 @@ export const useLiveChat = (socket, user) => {
               window.focus();
               setIsOpen(true);
 
-              navigateToRoom({
+              navigateToRoomRef.current({
                 id: m.room,
                 roomId: m.room,
                 name: m.senderName,
@@ -863,6 +859,16 @@ export const useLiveChat = (socket, user) => {
         payload.type || 'video'
       );
 
+      setIsConferenceCall(Boolean(payload.isConference));
+      setCallParticipants([{
+        socketId: payload.fromSocketId,
+        userId: payload.callerUserId,
+        name: payload.callerName || 'Bazzar contact',
+        profileImage: payload.profileImage || null,
+        state: 'joined'
+      }]);
+      setRemoteStreams([]);
+
       setCallState('incoming');
 
       setRemotePeerDetails({
@@ -871,6 +877,7 @@ export const useLiveChat = (socket, user) => {
         name:
           payload.callerName ||
           'Support Colleague',
+        profileImage: payload.profileImage || null,
         room: payload.room
       });
     };
@@ -888,6 +895,35 @@ export const useLiveChat = (socket, user) => {
       );
     };
 
+    const handleCallRoomJoined = ({ participants = [], isConference = false } = {}) => {
+      setCallState('connecting');
+      setIsConferenceCall(isConference);
+      setCallParticipants(participants.map(peer => ({ ...peer, state: 'joined' })));
+    };
+
+    const handleCallParticipantJoined = ({ participant } = {}) => {
+      if (!participant?.socketId) return;
+      setCallParticipants(previous => previous.some(peer => peer.socketId === participant.socketId)
+        ? previous.map(peer => peer.socketId === participant.socketId ? { ...participant, state: 'joined' } : peer)
+        : [...previous.filter(peer => peer.userId !== participant.userId), { ...participant, state: 'joined' }]);
+      createPeerConnection(participant.socketId);
+    };
+
+    const handleCallParticipantLeft = ({ socketId } = {}) => {
+      setCallParticipants(previous => previous.filter(peer => peer.socketId !== socketId));
+      setRemoteStreams(previous => previous.filter(peer => peer.socketId !== socketId));
+    };
+
+    const handleCallInvitationDeclined = ({ participant } = {}) => {
+      setCallParticipants(previous => previous.map(peer => peer.userId === participant?.userId ? { ...peer, state: 'declined' } : peer));
+      triggerToast(`${participant?.name || 'A participant'} declined the call.`, 'info');
+    };
+
+    const handleCallUnavailable = ({ reason } = {}) => {
+      clearCallSessionState();
+      triggerToast(reason || 'The other person is unavailable for a call right now.', 'error');
+    };
+
     /*
      * WEBRTC OFFER
      *
@@ -896,6 +932,7 @@ export const useLiveChat = (socket, user) => {
      */
     const handleReceiveRtcOffer = async ({
       fromSocketId,
+      fromPeer,
       offer
     }) => {
       try {
@@ -908,6 +945,12 @@ export const useLiveChat = (socket, user) => {
           getOrCreatePeerConnection(
             fromSocketId
           );
+
+        if (fromPeer) {
+          setCallParticipants(previous => previous.some(peer => peer.socketId === fromSocketId)
+            ? previous.map(peer => peer.socketId === fromSocketId ? { ...fromPeer, state: 'joined' } : peer)
+            : [...previous, { ...fromPeer, state: 'joined' }]);
+        }
 
         await pc.setRemoteDescription(
           new RTCSessionDescription(
@@ -936,7 +979,7 @@ export const useLiveChat = (socket, user) => {
             toSocketId:
               fromSocketId,
             answer:
-              pc.localDescription
+              pc.localDescription.toJSON()
           }
         );
 
@@ -944,12 +987,10 @@ export const useLiveChat = (socket, user) => {
           '[WebRTC] ANSWER SENT'
         );
 
-        while (
-          iceQueueRef.current.length >
-          0
-        ) {
-          const candidate =
-            iceQueueRef.current.shift();
+        const queuedCandidates = iceQueueRef.current.filter(item => item.fromSocketId === fromSocketId);
+        iceQueueRef.current = iceQueueRef.current.filter(item => item.fromSocketId !== fromSocketId);
+        for (const queued of queuedCandidates) {
+          const candidate = queued.candidate;
 
           try {
             await pc.addIceCandidate(
@@ -970,7 +1011,7 @@ export const useLiveChat = (socket, user) => {
           err
         );
 
-        endCallSession();
+        endCallSession('failed');
       }
     };
 
@@ -978,10 +1019,9 @@ export const useLiveChat = (socket, user) => {
      * WEBRTC ANSWER
      */
     const handleReceiveRtcAnswer =
-      async ({ answer }) => {
+      async ({ answer, fromSocketId }) => {
         try {
-          const pc =
-            peerConnectionRef.current;
+          const pc = peerConnectionsRef?.current?.get?.(fromSocketId) || peerConnectionRef?.current;
 
           if (!pc) {
             console.warn(
@@ -1005,12 +1045,10 @@ export const useLiveChat = (socket, user) => {
             '[WebRTC] Caller remote description set'
           );
 
-          while (
-            iceQueueRef.current.length >
-            0
-          ) {
-            const candidate =
-              iceQueueRef.current.shift();
+          const queuedCandidates = iceQueueRef.current.filter(item => item.fromSocketId === fromSocketId);
+          iceQueueRef.current = iceQueueRef.current.filter(item => item.fromSocketId !== fromSocketId);
+          for (const queued of queuedCandidates) {
+            const candidate = queued.candidate;
 
             try {
               await pc.addIceCandidate(
@@ -1031,7 +1069,7 @@ export const useLiveChat = (socket, user) => {
             err
           );
 
-          endCallSession();
+          endCallSession('failed');
         }
       };
 
@@ -1039,11 +1077,10 @@ export const useLiveChat = (socket, user) => {
      * ICE CANDIDATES
      */
     const handleReceiveIceCandidate =
-      async ({ candidate }) => {
+      async ({ candidate, fromSocketId }) => {
         if (!candidate) return;
 
-        const pc =
-          peerConnectionRef.current;
+        const pc = peerConnectionsRef?.current?.get?.(fromSocketId) || peerConnectionRef?.current;
 
         if (
           pc &&
@@ -1063,9 +1100,7 @@ export const useLiveChat = (socket, user) => {
             );
           }
         } else {
-          iceQueueRef.current.push(
-            candidate
-          );
+          iceQueueRef.current.push({ fromSocketId, candidate });
         }
       };
 
@@ -1142,6 +1177,16 @@ export const useLiveChat = (socket, user) => {
     socket.on(
       'call_accepted_by_peer',
       handleCallAccepted
+    );
+
+    socket.on('call_room_joined', handleCallRoomJoined);
+    socket.on('call_participant_joined', handleCallParticipantJoined);
+    socket.on('call_participant_left', handleCallParticipantLeft);
+    socket.on('call_invitation_declined', handleCallInvitationDeclined);
+
+    socket.on(
+      'call_unavailable',
+      handleCallUnavailable
     );
 
     socket.on(
@@ -1240,6 +1285,16 @@ export const useLiveChat = (socket, user) => {
         handleCallAccepted
       );
 
+      socket.off('call_room_joined', handleCallRoomJoined);
+      socket.off('call_participant_joined', handleCallParticipantJoined);
+      socket.off('call_participant_left', handleCallParticipantLeft);
+      socket.off('call_invitation_declined', handleCallInvitationDeclined);
+
+      socket.off(
+        'call_unavailable',
+        handleCallUnavailable
+      );
+
       socket.off(
         'receive_rtc_offer',
         handleReceiveRtcOffer
@@ -1279,6 +1334,10 @@ export const useLiveChat = (socket, user) => {
     getOrCreatePeerConnection,
     clearCallSessionState,
     peerConnectionRef,
+    peerConnectionsRef,
+    setCallParticipants,
+    setRemoteStreams,
+    setIsConferenceCall,
     endCallSession,
     triggerToast
   ]);
@@ -1369,6 +1428,9 @@ export const useLiveChat = (socket, user) => {
       currentUsername
     ]
   );
+
+  const navigateToRoomRef = useRef(navigateToRoom);
+  navigateToRoomRef.current = navigateToRoom;
 
   const triggerCreateGroup = async e => {
     e.preventDefault();

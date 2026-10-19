@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, AlertTriangle, Info, X } from 'lucide-react';
 
 export const BuiltInNotification = ({ visible, message, type, onClose, duration = 3000 }) => {
@@ -18,21 +18,19 @@ export const BuiltInNotification = ({ visible, message, type, onClose, duration 
       }, 250); // Matches transition duration precisely
       return () => clearTimeout(fadeTimer);
     }
-  }, [visible]);
+  }, [visible, renderState]);
+
+  const handleCloseTrigger = useCallback(() => {
+    setIsFadingOut(true);
+    setTimeout(() => onClose(), 250);
+  }, [onClose]);
 
   useEffect(() => {
     if (visible && duration && type !== 'error') {
       const autoCloseTimer = setTimeout(() => handleCloseTrigger(), duration);
       return () => clearTimeout(autoCloseTimer);
     }
-  }, [visible, duration, type]);
-
-  const handleCloseTrigger = () => {
-    setIsFadingOut(true);
-    setTimeout(() => {
-      onClose();
-    }, 250);
-  };
+  }, [visible, duration, type, handleCloseTrigger]);
 
   if (!renderState) return null;
 

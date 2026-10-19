@@ -3,7 +3,9 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const path = require('path');
-const jwt = require('jsonwebtoken');
+const { protect, requireAdmin } = require('../middleware/auth');
+const Inventory = require('../models/Inventory');
+const mongoose = require('mongoose');
 
 // 🚀 Destructure all controller methods perfectly (including your brand new wishlist methods!)
 const { 
@@ -14,30 +16,9 @@ const {
   getItemById, 
   addProductReview,
   getWishlist,     // 👈 Mounted
-  toggleWishlist   // 👈 Mounted
+  toggleWishlist,  // 👈 Mounted
+  claimOrphanedItem
 } = require('../controllers/inventoryController');
-
-// Built-in Authentication Middleware Guard
-const protect = (req, res, next) => {
-  const authHeader = req.header('Authorization');
-  if (!authHeader) {
-    return res.status(401).json({ error: 'Access denied. No authentication token provided.' });
-  }
-  const parts = authHeader.split(' ');
-  if (parts.length !== 2 || parts[0] !== 'Bearer') {
-    return res.status(401).json({ error: 'Token configuration error. Expected format: Bearer <token>' });
-  }
-  const token = parts[1];
-  try {
-    const secretKey = process.env.JWT_SECRET || 'your_fallback_jwt_secret';
-    const decoded = jwt.verify(token, secretKey);
-    req.user = decoded;
-    next();
-  } catch (err) {
-    console.error('⚠️ Token Validation Fault:', err.message);
-    return res.status(401).json({ error: 'Invalid or expired authentication signature token.' });
-  }
-};
 
 // Configure disk engine storage for product uploads
 const storage = multer.diskStorage({
@@ -45,23 +26,42 @@ const storage = multer.diskStorage({
     cb(null, 'public/uploads/products/');
   },
   filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
+    const safeName = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_');
+    cb(null, `${Date.now()}-${safeName}`);
   }
 });
 
 const upload = multer({
   storage,
-  limits: { fileSize: 1024 * 1024 * 5 }, // 5MB limit
+  limits: { fileSize: 1024 * 1024 * 25, files: 10 },
   fileFilter: (req, file, cb) => {
-    const filetypes = /jpeg|jpg|png|webp/;
-    const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = filetypes.test(file.mimetype);
-    if (extname && mimetype) {
-      return cb(null, true);
-    }
-    cb(new Error('Only images (jpeg, jpg, png, webp) are allowed!'));
+    const allowed = {
+      '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif',
+      '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime'
+    };
+    const extension = path.extname(file.originalname).toLowerCase();
+    if (allowed[extension] === file.mimetype) return cb(null, true);
+    cb(new Error('Only image and video files can be uploaded.'));
   }
 });
+const uploadProductMedia = upload.fields([
+  { name: 'productImage', maxCount: 1 },
+  { name: 'productMedia', maxCount: 10 }
+]);
+
+const requireListingOwnerOrAdmin = async (req, res, next) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ error: 'Invalid listing ID.' });
+  try {
+    const item = await Inventory.findById(req.params.id).select('createdBy').lean();
+    if (!item) return res.status(404).json({ error: 'Product not found.' });
+    if (req.user.role !== 'admin' && String(item.createdBy) !== String(req.user.id)) {
+      return res.status(403).json({ error: 'You can only edit your own listings.' });
+    }
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+};
 
 // =========================================================================
 // LIVE API ENDPOINTS ROUTING MOUNT (WITH REAL-TIME BROADCAST HOOKS)
@@ -71,15 +71,41 @@ const socketManager = require('../config/socket'); // 🚀 IMPORT THE SOCKET INS
 // 🚀 CRITICAL PLACEMENT: Wishlist endpoints must sit ABOVE /:id so Express resolves them cleanly first
 router.get('/wishlist', protect, getWishlist);
 router.post('/wishlist/toggle', protect, toggleWishlist);
+router.post('/:id/claim', protect, requireAdmin, async (req, res, next) => {
+  res.on('finish', () => {
+    if (res.statusCode === 200) socketManager.getIO().emit('inventory_updated');
+  });
+  return claimOrphanedItem(req, res, next);
+});
 
 // 1. Bulk Catalog Retrieval
 router.get('/', protect, getItems);
+
+// Orders and product-specific seller conversations
+const { createOrder, getProductConversation, sendProductMessage, listMyConversations, listMarketplaceVendors, getConversationById, sendConversationMessage, listSellingOrders, listBuyingOrders, updateSellingOrder, deleteMarketplaceOrder } = require('../controllers/marketplaceController');
+const broadcastInventoryAfterSuccess = (req, res, next) => {
+  res.on('finish', () => {
+    if (res.statusCode === 200 || res.statusCode === 201) socketManager.getIO().emit('inventory_updated');
+  });
+  next();
+};
+router.get('/orders/selling', protect, listSellingOrders);
+router.get('/orders/buying', protect, listBuyingOrders);
+router.patch('/orders/:orderId', protect, broadcastInventoryAfterSuccess, updateSellingOrder);
+router.delete('/orders/:orderId', protect, broadcastInventoryAfterSuccess, deleteMarketplaceOrder);
+router.get('/vendors', protect, listMarketplaceVendors);
+router.get('/conversations', protect, listMyConversations);
+router.get('/conversations/:conversationId', protect, getConversationById);
+router.post('/conversations/:conversationId/messages', protect, sendConversationMessage);
+router.post('/:id/orders', protect, broadcastInventoryAfterSuccess, createOrder);
+router.get('/:id/conversation', protect, getProductConversation);
+router.post('/:id/conversation', protect, sendProductMessage);
 
 // 2. Individual Item Retrieval Pipeline
 router.get('/:id', protect, getItemById);
 
 // 3. New Entry Submission Engine
-router.post('/', protect, upload.single('productImage'), async (req, res, next) => {
+router.post('/', protect, uploadProductMedia, async (req, res, next) => {
   try {
     // Intercept the controller execution to emit events when an item is added
     res.on('finish', () => {
@@ -92,7 +118,7 @@ router.post('/', protect, upload.single('productImage'), async (req, res, next) 
 });
 
 // 4. Live Operational Asset Update Node
-router.put('/:id', protect, upload.single('productImage'), async (req, res, next) => {
+router.put('/:id', protect, requireListingOwnerOrAdmin, uploadProductMedia, async (req, res, next) => {
   try {
     res.on('finish', () => {
       if (res.statusCode === 200) {

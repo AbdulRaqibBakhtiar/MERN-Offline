@@ -16,10 +16,6 @@ export const MessageFileDownload = ({ attachmentUrl, isMe, msg }) => {
       .toLowerCase();
   }
 
-  const urlSlug = attachmentUrl
-    ? attachmentUrl.substring(attachmentUrl.lastIndexOf('/') + 1)
-    : 'Document_Asset';
-
   // Fallback detection
   if (!fileExtension && msg?.name) {
     const checkName = msg.name.toLowerCase();

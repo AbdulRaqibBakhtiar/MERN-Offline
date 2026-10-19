@@ -1,77 +1,198 @@
-// server/routes/content.js
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const jwt = require('jsonwebtoken');
+const path = require('path');
+const { protect, requireAdmin } = require('../middleware/auth');
+const { requireNewsOwnerOrEditor, requireNewsAuthoringRole } = require('../middleware/newsAuthorization');
 
-// Import modular controller handlers
-const { getNewsFeed, createNewsArticle, updateNewsArticle, deleteNewsArticle, addNewsComment } = require('../controllers/newsController');
-const { getActiveAds, createAdCampaign, updateAdCampaign, deleteAdCampaign } = require('../controllers/adController');
+const {
+  getNewsFeed,
+  createNewsArticle,
+  updateNewsArticle,
+  deleteNewsArticle,
+  addNewsComment,
+  editNewsComment,
+  toggleNewsLike,
+  approveComment,
+  disapproveComment,
+  deleteNewsComment,
+  addCommentReply,
+  approveReply,
+  disapproveReply
+} = require('../controllers/newsController');
 
-const protect = (req, res, next) => {
-    const authHeader = req.header('Authorization');
-    if (!authHeader) return res.status(401).json({ error: 'Access denied. Token session required.' });
-    
-    const token = authHeader.split(' ')[1];
-    try {
-        const secretKey = process.env.JWT_SECRET || 'your_fallback_jwt_secret';
-        req.user = jwt.verify(token, secretKey);
-        next();
-    } catch (err) {
-        return res.status(401).json({ error: 'Session authorization failed or token signature expired.' });
-    }
-};
+const {
+  getActiveAds,
+  createAdCampaign,
+  updateAdCampaign,
+  deleteAdCampaign
+} = require('../controllers/adController');
 
 const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        const folder = req.path.includes('news') ? 'public/uploads/news/' : 'public/uploads/ads/';
-        cb(null, folder);
-    },
-    filename: (req, file, cb) => {
-        cb(null, `${Date.now()}-${file.originalname}`);
-    }
+  destination: (req, file, cb) => {
+    const folder = req.path.includes('/news')
+      ? 'public/uploads/news/'
+      : 'public/uploads/ads/';
+
+    cb(null, folder);
+  },
+
+  filename: (req, file, cb) => {
+    const safeName = file.originalname.replace(
+      /[^a-zA-Z0-9._-]/g,
+      '_'
+    );
+
+    cb(
+      null,
+      `${Date.now()}-${Math.round(Math.random() * 1e9)}-${safeName}`
+    );
+  }
 });
-const upload = multer({ storage });
 
-// A. SECURITY AUTHENTICATED CHANNELS: HOME TIMELINE NEWS FEED POSTS
-router.get('/news/latest', getNewsFeed);
-router.post('/news', protect, upload.single('image'), createNewsArticle);
-router.put('/news/:id', protect, upload.single('image'), updateNewsArticle);
-router.delete('/news/:id', protect, deleteNewsArticle);
+const upload = multer({
+  storage,
+  limits: {
+    files: 10,
+    fileSize: 25 * 1024 * 1024
+  },
 
-// 🚀 NEW: DYNAMIC COMMENT SUBMISSION ROUTE
-router.post('/news/:id/comments', protect, addNewsComment);
-
-// B. SECURITY AUTHENTICATED CHANNELS: SPONSORED LINKS AD BANNER CAMPAIGNS
-router.get('/ads/active', getActiveAds);
-router.post('/ads', protect, upload.single('image'), createAdCampaign);
-router.put('/ads/:id', protect, upload.single('image'), updateAdCampaign);
-router.delete('/ads/:id', protect, deleteAdCampaign);
-// C. DYNAMIC DISCUSSION FEEDS
-router.post('/news/:id/comments', protect, addNewsComment);
-
-// 🚀 NEW: Authenticated Moderator route to remove an individual comment
-router.delete('/news/:newsId/comments/:commentId', protect, async (req, res) => {
-    try {
-        const { newsId, commentId } = req.params;
-        const News = require('../models/News');
-
-        // Remove the specific comment object out of the sub-document comments array
-        const updatedPost = await News.findByIdAndUpdate(
-            newsId,
-            { $pull: { comments: { _id: commentId } } },
-            { new: true }
-        );
-
-        if (!updatedPost) {
-            return res.status(404).json({ error: "Target article context missing." });
-        }
-
-        // Return the fresh comments list back to your React app
-        res.status(200).json(updatedPost.comments);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+  fileFilter: (req, file, cb) => {
+    const extension = path.extname(file.originalname).toLowerCase();
+    const allowedTypes = {
+      '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+      '.webp': 'image/webp', '.gif': 'image/gif', '.mp4': 'video/mp4',
+      '.webm': 'video/webm', '.mov': 'video/quicktime'
+    };
+    if (allowedTypes[extension] === file.mimetype) {
+      cb(null, true);
+    } else {
+      cb(
+        new Error(
+          'Only image and video files are allowed.'
+        )
+      );
     }
+  }
 });
+
+const newsUpload = upload.fields([
+  {
+    name: 'images',
+    maxCount: 10
+  },
+  {
+    name: 'image',
+    maxCount: 1
+  },
+  {
+    name: 'video',
+    maxCount: 1
+  }
+]);
+
+router.get(
+  '/news/latest',
+  getNewsFeed
+);
+
+router.post(
+  '/news',
+  protect, requireNewsAuthoringRole,
+  newsUpload,
+  createNewsArticle
+);
+
+router.put(
+  '/news/:id',
+  protect, requireNewsOwnerOrEditor,
+  newsUpload,
+  updateNewsArticle
+);
+
+router.delete(
+  '/news/:id',
+  protect, requireNewsOwnerOrEditor,
+  deleteNewsArticle
+);
+
+router.post(
+  '/news/:id/like',
+  protect,
+  toggleNewsLike
+);
+
+router.post(
+  '/news/:id/comments',
+  protect,
+  addNewsComment
+);
+
+router.put(
+  '/news/:newsId/comments/:commentId',
+  protect,
+  editNewsComment
+);
+
+router.delete(
+  '/news/:newsId/comments/:commentId',
+  protect,
+  deleteNewsComment
+);
+
+router.post(
+  '/news/:newsId/comments/:commentId/approve',
+  protect,
+  approveComment
+);
+
+router.post(
+  '/news/:newsId/comments/:commentId/disapprove',
+  protect,
+  disapproveComment
+);
+
+router.post(
+  '/news/:newsId/comments/:commentId/replies',
+  protect,
+  addCommentReply
+);
+
+router.post(
+  '/news/:newsId/comments/:commentId/replies/:replyId/approve',
+  protect,
+  approveReply
+);
+
+router.post(
+  '/news/:newsId/comments/:commentId/replies/:replyId/disapprove',
+  protect,
+  disapproveReply
+);
+
+router.get(
+  '/ads/active',
+  getActiveAds
+);
+
+router.post(
+  '/ads',
+  protect, requireAdmin,
+  upload.array('images', 10),
+  createAdCampaign
+);
+
+router.put(
+  '/ads/:id',
+  protect, requireAdmin,
+  upload.array('images', 10),
+  updateAdCampaign
+);
+
+router.delete(
+  '/ads/:id',
+  protect, requireAdmin,
+  deleteAdCampaign
+);
 
 module.exports = router;

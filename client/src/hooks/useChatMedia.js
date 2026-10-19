@@ -28,6 +28,17 @@ export const useChatMedia = (
 
   const [callState, setCallState] = useState('idle');
   const [callType, setCallType] = useState('video');
+  const rtcConfigRef = useRef(RTC_CONFIG);
+
+  useEffect(() => {
+    if (!socket) return undefined;
+    const updateIceServers = servers => {
+      if (Array.isArray(servers) && servers.length) rtcConfigRef.current = { ...RTC_CONFIG, iceServers: servers };
+    };
+    socket.on('rtc_ice_servers', updateIceServers);
+    if (socket.connected) socket.emit('request_rtc_ice_servers');
+    return () => socket.off('rtc_ice_servers', updateIceServers);
+  }, [socket]);
 
   const [remotePeerDetails, setRemotePeerDetails] = useState({
     socketId: '',
@@ -39,6 +50,9 @@ export const useChatMedia = (
   const [isCamOff, setIsCamOff] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
   const [connectionQuality, setConnectionQuality] = useState('good');
+  const [callParticipants, setCallParticipants] = useState([]);
+  const [remoteStreams, setRemoteStreams] = useState([]);
+  const [isConferenceCall, setIsConferenceCall] = useState(false);
 
   const wasNotIdleRef = useRef(false);
 
@@ -47,6 +61,7 @@ export const useChatMedia = (
 
   const localStreamRef = useRef(null);
   const peerConnectionRef = useRef(null);
+  const peerConnectionsRef = useRef(new Map());
 
   const durationTimerRef = useRef(null);
   const ringTimeoutRef = useRef(null);
@@ -60,6 +75,10 @@ export const useChatMedia = (
   // React state updates are asynchronous and WebRTC signaling can
   // arrive before the state update has rendered.
   const callTypeRef = useRef('video');
+  const updateCallType = useCallback(type => {
+    callTypeRef.current = type;
+    setCallType(type);
+  }, []);
 
   // ---------------------------------------------------------
   // MEDIA ELEMENT ATTACHMENT
@@ -150,9 +169,10 @@ export const useChatMedia = (
       localStreamRef.current = null;
     }
 
-    // Close peer connection
-    if (peerConnectionRef.current) {
-      const pc = peerConnectionRef.current;
+    // Close every peer connection in the call.
+    const connections = new Set(peerConnectionsRef.current.values());
+    if (peerConnectionRef.current) connections.add(peerConnectionRef.current);
+    connections.forEach(pc => {
 
       pc.onicecandidate = null;
       pc.ontrack = null;
@@ -181,8 +201,12 @@ export const useChatMedia = (
         );
       }
 
-      peerConnectionRef.current = null;
-    }
+    });
+    peerConnectionsRef.current.clear();
+    peerConnectionRef.current = null;
+    setRemoteStreams([]);
+    setCallParticipants([]);
+    setIsConferenceCall(false);
 
     iceQueueRef.current = [];
 
@@ -214,7 +238,7 @@ export const useChatMedia = (
   // END CALL
   // ---------------------------------------------------------
 
-  const endCallSession = useCallback(() => {
+  const endCallSession = useCallback((reason) => {
     const peerId = remotePeerDetails?.socketId;
     const room =
       remotePeerDetails?.room ||
@@ -224,10 +248,11 @@ export const useChatMedia = (
     console.log('My socket:', socket?.id);
     console.log('Remote socket:', peerId);
 
-    if (socket?.connected && peerId) {
+    if (socket?.connected) {
       socket.emit('end_call_session', {
         room,
-        toSocketId: peerId
+        toSocketId: peerId,
+        reason
       });
     }
 
@@ -409,9 +434,8 @@ export const useChatMedia = (
 
   const getOrCreatePeerConnection = useCallback(
     targetSocketId => {
-      if (peerConnectionRef.current) {
-        return peerConnectionRef.current;
-      }
+      const existing = peerConnectionsRef.current.get(targetSocketId);
+      if (existing) return existing;
 
       if (!socket || !targetSocketId) {
         throw new Error(
@@ -424,9 +448,7 @@ export const useChatMedia = (
         targetSocketId
       );
 
-      const pc = new RTCPeerConnection(
-        RTC_CONFIG
-      );
+      const pc = new RTCPeerConnection(rtcConfigRef.current);
 
       // -----------------------------------------------------
       // ICE
@@ -441,7 +463,7 @@ export const useChatMedia = (
             'send_ice_candidate',
             {
               toSocketId: targetSocketId,
-              candidate: event.candidate
+              candidate: event.candidate.toJSON()
             }
           );
         }
@@ -461,9 +483,12 @@ export const useChatMedia = (
           event.streams &&
           event.streams[0]
         ) {
-          attachRemoteStream(
-            event.streams[0]
-          );
+          setRemoteStreams(previous => {
+            const current = previous.find(item => item.socketId === targetSocketId);
+            if (current?.stream === event.streams[0]) return previous;
+            return [...previous.filter(item => item.socketId !== targetSocketId), { socketId: targetSocketId, stream: event.streams[0] }];
+          });
+          if (callParticipants.length <= 1) attachRemoteStream(event.streams[0]);
         }
       };
 
@@ -504,11 +529,17 @@ export const useChatMedia = (
               'disconnected'
             );
 
-            endCallSession();
+            if (isConferenceCall) {
+              peerConnectionsRef.current.delete(targetSocketId);
+              setRemoteStreams(previous => previous.filter(item => item.socketId !== targetSocketId));
+              setCallParticipants(previous => previous.map(item => item.socketId === targetSocketId ? { ...item, state: 'connection_failed' } : item));
+              pc.close();
+              triggerToast('One participant lost their connection.', 'info');
+            } else endCallSession('failed');
             break;
 
           case 'closed':
-            clearCallSessionState();
+            peerConnectionsRef.current.delete(targetSocketId);
             break;
 
           default:
@@ -549,6 +580,16 @@ export const useChatMedia = (
           setConnectionQuality(
             'disconnected'
           );
+          if (isConferenceCall) {
+            peerConnectionsRef.current.delete(targetSocketId);
+            setRemoteStreams(previous => previous.filter(item => item.socketId !== targetSocketId));
+            setCallParticipants(previous => previous.map(item => item.socketId === targetSocketId ? { ...item, state: 'connection_failed' } : item));
+            pc.close();
+            triggerToast('One participant could not connect. A TURN relay may be needed on restrictive networks.', 'info');
+          } else {
+            triggerToast('A network relay is required for this connection. Configure a TURN service to call across restrictive networks.', 'error');
+            endCallSession('failed');
+          }
         }
       };
 
@@ -574,7 +615,27 @@ export const useChatMedia = (
           });
       }
 
-      peerConnectionRef.current = pc;
+      // A mesh conference sends this camera stream to every participant.
+      // Keep each outgoing leg modest so a 10-person room does not saturate
+      // the caller's upload connection.
+      if (isConferenceCall) {
+        pc.getSenders().forEach(sender => {
+          if (sender.track?.kind !== 'video' || !sender.getParameters || !sender.setParameters) return;
+          const parameters = sender.getParameters();
+          parameters.encodings = parameters.encodings?.length ? parameters.encodings : [{}];
+          parameters.encodings = parameters.encodings.map(encoding => ({
+            ...encoding,
+            maxBitrate: 220000,
+            maxFramerate: 15
+          }));
+          sender.setParameters(parameters).catch(error => {
+            console.warn('[WebRTC] Could not apply conference video limit:', error);
+          });
+        });
+      }
+
+      peerConnectionsRef.current.set(targetSocketId, pc);
+      if (!peerConnectionRef.current) peerConnectionRef.current = pc;
 
       return pc;
     },
@@ -582,7 +643,9 @@ export const useChatMedia = (
       socket,
       attachRemoteStream,
       endCallSession,
-      clearCallSessionState
+      triggerToast,
+      callParticipants,
+      isConferenceCall
     ]
   );
 
@@ -622,7 +685,7 @@ export const useChatMedia = (
             toSocketId:
               targetSocketId,
             offer:
-              pc.localDescription
+              pc.localDescription.toJSON()
           }
         );
 
@@ -642,7 +705,7 @@ export const useChatMedia = (
           'error'
         );
 
-        endCallSession();
+        endCallSession('failed');
       }
     },
     [
@@ -661,6 +724,11 @@ export const useChatMedia = (
     type,
     options = {}
   ) => {
+    if (!socket?.connected) {
+      triggerToast('Chat is disconnected. Reconnect before starting a call.', 'error');
+      return;
+    }
+
     const roomId =
       options.roomId ||
       'global_workspace';
@@ -668,31 +736,39 @@ export const useChatMedia = (
     const peerId =
       options.targetPeerId;
 
+    const targets = Array.isArray(options.targets) ? options.targets.slice(0, 3) : [];
+    if (!peerId && targets.length === 0) {
+      triggerToast('Choose at least one participant for the call.', 'error');
+      return;
+    }
+
     const sessionId =
       ++callSessionIdRef.current;
 
     // Keep both state and ref synchronized.
     callTypeRef.current = type;
-    setCallType(type);
+    updateCallType(type);
 
     // Clear stale ICE
     iceQueueRef.current = [];
 
     // Clear stale PC if one somehow remains.
-    if (peerConnectionRef.current) {
-      try {
-        peerConnectionRef.current.close();
-      } catch (err) {}
-
-      peerConnectionRef.current = null;
-    }
+    peerConnectionsRef.current.forEach(pc => { try { pc.close(); } catch (err) {} });
+    peerConnectionsRef.current.clear();
+    peerConnectionRef.current = null;
+    setRemoteStreams([]);
+    setIsConferenceCall(Boolean(options.conference));
+    setCallParticipants(targets.length
+      ? targets.map(target => ({ socketId: null, userId: target.userId || target.id, name: target.name || target.username || 'Bazzar contact', profileImage: target.profileImage || target.avatar || null, state: 'invited' }))
+      : [{ socketId: null, userId: peerId, name: options.targetName || 'Bazzar contact', profileImage: options.targetAvatar || null, state: 'invited' }]);
 
     setCallState('ringing');
 
     setRemotePeerDetails({
       socketId: peerId || '',
       room: roomId,
-      name: ''
+      name: options.targetName || 'Bazzar contact',
+      profileImage: options.targetAvatar || null
     });
 
     try {
@@ -716,11 +792,12 @@ export const useChatMedia = (
           type === 'video'
             ? {
                 width: {
-                  ideal: 1280
+                  ideal: options.conference ? 640 : 1280
                 },
                 height: {
-                  ideal: 720
+                  ideal: options.conference ? 360 : 720
                 },
+                frameRate: options.conference ? { ideal: 15, max: 20 } : undefined,
                 facingMode: 'user'
               }
             : false
@@ -778,6 +855,8 @@ export const useChatMedia = (
         {
           room: roomId,
           targetPeerId: peerId,
+          targetPeerIds: targets.map(target => target.userId || target.id),
+          conference: Boolean(options.conference),
           callerName:
             currentUsername,
           type
@@ -803,7 +882,7 @@ export const useChatMedia = (
               'info'
             );
 
-            endCallSession();
+            endCallSession('no_answer');
           }
         }, 30000);
 
@@ -906,17 +985,19 @@ export const useChatMedia = (
           activeCallType
         );
 
+        const conference = isConferenceCall;
         const mediaConstraints = {
           audio: true,
           video:
             activeCallType === 'video'
               ? {
                   width: {
-                    ideal: 1280
+                    ideal: conference ? 640 : 1280
                   },
                   height: {
-                    ideal: 720
+                    ideal: conference ? 360 : 720
                   },
+                  frameRate: conference ? { ideal: 15, max: 20 } : undefined,
                   facingMode: 'user'
                 }
               : false
@@ -1091,10 +1172,16 @@ export const useChatMedia = (
     setCallState,
 
     callType,
-    setCallType,
+    setCallType: updateCallType,
 
     remotePeerDetails,
     setRemotePeerDetails,
+    callParticipants,
+    setCallParticipants,
+    remoteStreams,
+    setRemoteStreams,
+    isConferenceCall,
+    setIsConferenceCall,
 
     localVideoRef,
     remoteVideoRef,
@@ -1120,6 +1207,7 @@ export const useChatMedia = (
     connectionQuality,
 
     localStreamRef,
-    peerConnectionRef
+    peerConnectionRef,
+    peerConnectionsRef
   };
 };

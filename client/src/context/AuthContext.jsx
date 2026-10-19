@@ -27,10 +27,10 @@ export const AuthProvider = ({ children }) => {
     } 
   }; 
 
-  const register = async (username, email, password, firstName, lastName, phoneNumber) => { 
+  const register = async (username, email, password, firstName, lastName, phoneNumber, shippingAddress, preferredPaymentMethod) => { 
     try { 
       setAuthError(""); 
-      const payload = { username, email, password, firstName, lastName, phoneNumber }; 
+      const payload = { username, email, password, firstName, lastName, phoneNumber, shippingAddress, preferredPaymentMethod }; 
       return await api.post("/auth/register", payload); 
     } catch (err) { 
       console.error("❌ AuthContext Network Failure Response:", err.response?.data); 

@@ -1,7 +1,16 @@
 // src/components/Modal/DeleteModal.jsx
 import React, { useState } from "react";
+import { createPortal } from 'react-dom';
 
-function DeleteModal({ deleteTargetId, handleConfirmDelete, setDeleteTargetId }) {
+function DeleteModal({
+  deleteTargetId,
+  handleConfirmDelete,
+  setDeleteTargetId,
+  title = 'Remove Catalog Asset?',
+  message = 'Are you sure you want to delete this inventory item? This operation cannot be undone.',
+  confirmLabel = 'Confirm Delete',
+  busy = false
+}) {
   // Track button hover states locally to inject clean interactive scaling transitions
   const [hoveredButton, setHoveredRatio] = useState(null);
 
@@ -9,7 +18,7 @@ function DeleteModal({ deleteTargetId, handleConfirmDelete, setDeleteTargetId })
     return null;
   }
 
-  return (
+  return createPortal((
     <div 
       className="modal-overlay" 
       style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.6)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999, animation: 'fadeIn 0.2s ease-out' }} 
@@ -24,33 +33,34 @@ function DeleteModal({ deleteTargetId, handleConfirmDelete, setDeleteTargetId })
         </div>
 
         <h3 style={{ margin: '0 0 8px 0', fontSize: '1.25rem', fontWeight: '700', color: 'var(--text-primary, #0f172a)', letterSpacing: '-0.025em' }} > 
-          Remove Catalog Asset? 
+          {title}
         </h3>
         <p style={{ color: 'var(--text-muted, #64748b)', fontSize: '0.9rem', margin: '0 0 24px 0', lineHeight: '1.5' }} > 
-          Are you sure you want to delete this inventory item? This operation cannot be undone. 
+          {message}
         </p>
         <div style={{ display: 'flex', gap: '10px' }}>
           {/* Cancel Secondary Button */}
           <button 
             type="button" 
-            onClick={() => setDeleteTargetId(null)} 
+            onClick={() => !busy && setDeleteTargetId(null)} 
             onMouseEnter={() => setHoveredRatio('cancel')} 
             onMouseLeave={() => setHoveredRatio(null)} 
             style={{ flex: 1, color: 'var(--text-primary, #334155)', border: '1px solid var(--border-color, #cbd5e1)', borderRadius: '6px', padding: '12px', fontSize: '0.9rem', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s ease-in-out', transform: hoveredButton === 'cancel' ? 'translateY(-1px)' : 'none', backgroundColor: hoveredButton === 'cancel' ? 'var(--border-color, #e2e8f0)' : 'var(--bg-main, #f1f5f9)' }} 
           > 
-            Cancel 
+            Cancel
           </button>
 
           {/* Confirm Destruction Primary Button */}
           <button 
             type="button" 
-            onClick={handleConfirmDelete} 
+            disabled={busy}
+            onClick={handleConfirmDelete}
             onMouseEnter={() => setHoveredRatio('delete')} 
             onMouseLeave={() => setHoveredRatio(null)} 
             className="delete-button" 
-            style={{ flex: 1, backgroundColor: hoveredButton === 'delete' ? '#bd2130' : '#dc3545', color: '#ffffff', border: 'none', borderRadius: '6px', padding: '12px', fontSize: '0.9rem', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s ease-in-out', boxShadow: hoveredButton === 'delete' ? '0 4px 12px rgba(220, 53, 69, 0.25)' : 'none', transform: hoveredButton === 'delete' ? 'translateY(-1px)' : 'none' }} 
+            style={{ flex: 1, backgroundColor: hoveredButton === 'delete' ? '#bd2130' : '#dc3545', color: '#ffffff', border: 'none', borderRadius: '6px', padding: '12px', fontSize: '0.9rem', fontWeight: '600', cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.75 : 1, transition: 'all 0.2s ease-in-out', boxShadow: hoveredButton === 'delete' ? '0 4px 12px rgba(220, 53, 69, 0.25)' : 'none', transform: hoveredButton === 'delete' ? 'translateY(-1px)' : 'none' }} 
           > 
-            Confirm Delete 
+            {busy ? 'Deleting…' : confirmLabel}
           </button>
         </div>
 
@@ -61,7 +71,7 @@ function DeleteModal({ deleteTargetId, handleConfirmDelete, setDeleteTargetId })
         `}</style>
       </div>
     </div>
-  );
+  ), document.body);
 }
 
 export default DeleteModal;

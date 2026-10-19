@@ -6,10 +6,11 @@ import { useAuth } from './context/AuthContext';
 import { SocketProvider } from './context/SocketContext';
 import LoginContainer from './pages/LoginContainer';
 import HomeContainer from './pages/HomeContainer';
-import RegisterPage from './pages/RegisterPage';
 import ProductPurchasePage from './pages/ProductPurchasePage';
-import SettingsPage from './pages/SettingsPage';
+import AboutPage from './pages/AboutPage';
 import NotFound from './pages/NotFound';
+import PasswordRecoveryPage from './pages/PasswordRecoveryPage';
+import PublicArticlesPage from './pages/PublicArticlesPage';
 
 const ProtectedRoute = () => {
   const { token } = useAuth();
@@ -32,7 +33,10 @@ function App() {
   return (
     <Routes>
       <Route path="/login" element={token ? <Navigate to="/home" replace /> : <LoginContainer />} />
-      <Route path="/register" element={token ? <Navigate to="/home" replace /> : <RegisterPage />} />
+      <Route path="/register" element={token ? <Navigate to="/home" replace /> : <LoginContainer initialRegisterMode />} />
+      <Route path="/forgot-password" element={<PasswordRecoveryPage />} />
+      <Route path="/reset-password" element={<PasswordRecoveryPage reset />} />
+      <Route path="/articles" element={<PublicArticlesPage />} />
       
       <Route element={<ProtectedRoute />}>
         <Route element={ <SocketProvider> <Outlet /> </SocketProvider> } >
@@ -41,7 +45,8 @@ function App() {
           <Route path="/home" element={<HomeContainer theme={theme} setTheme={setTheme} />} />
           
           <Route path="/purchase/:itemId" element={<ProductPurchasePage />} />
-          <Route path="/settings" element={<SettingsPage theme={theme} setTheme={setTheme} />} />
+          <Route path="/about" element={<AboutPage />} />
+          <Route path="/settings" element={<Navigate to="/home" replace />} />
           <Route path="/" element={<Navigate to="/home" replace />} />
         </Route>
       </Route>

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 
 export function useInventoryData({ inventory, searchQuery, searchCategory }) {
-  const { itemList = [], addItem } = inventory;
+  const { itemList = [] } = inventory;
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [isCropOpen, setIsCropOpen] = useState(false);
@@ -22,9 +22,18 @@ export function useInventoryData({ inventory, searchQuery, searchCategory }) {
     setFinalProductFile(file);
     setProductPreviewUrl(URL.createObjectURL(file));
   };
-  const safeItemList = Array.isArray(itemList) ? itemList : [];
+  // Protect the catalog from repeated records if a server response contains the
+  // same listing more than once. Keep the first occurrence and preserve order.
+  const seenListingIds = new Set();
+  const safeItemList = Array.isArray(itemList) ? itemList.filter(item => {
+    if (!item) return false;
+    if (!item._id) return true;
+    const id = String(item._id);
+    if (seenListingIds.has(id)) return false;
+    seenListingIds.add(id);
+    return true;
+  }) : [];
   
-  // 🔍 Fully Activated Evaluation Grid Filter Matrix
   const filteredItems = safeItemList.filter(item => {
     if (!item) return false;
 
@@ -35,12 +44,19 @@ export function useInventoryData({ inventory, searchQuery, searchCategory }) {
       if (itemCatLower !== filterCatLower) return false;
     }
 
-    // 2. Evaluate Text Matching bounds (Product Name or Manufacturing Brand)
-    const itemNameString = (item.name || "").toLowerCase();
-    const itemBrandString = (item.brand || "").toLowerCase();
+    // Match the fields shoppers use to identify a listing.
     const lowerSearchQuery = (searchQuery || "").toLowerCase().trim();
-    
-    return itemNameString.includes(lowerSearchQuery) || itemBrandString.includes(lowerSearchQuery);
+    if (!lowerSearchQuery) return true;
+    const searchableFields = [
+      item.name,
+      item.brand,
+      item.category,
+      item.description,
+      item.createdBy?.username,
+      item.createdBy?.firstName,
+      item.createdBy?.lastName
+    ];
+    return searchableFields.some(value => String(value || "").toLowerCase().includes(lowerSearchQuery));
   });
 
   const indexOfLastItem = currentPage * itemsPerPage;

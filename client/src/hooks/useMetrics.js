@@ -1,15 +1,16 @@
 // src/hooks/useMetrics.js
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSocket } from "../context/SocketContext"; // 🛰️ Live WebSocket listener hook
 import api from "../api/axios";
 
-function useMetrics(currentStats = {}) {
+function useMetrics(enabled = true) {
   const [metricHistory, setMetricHistory] = useState([]);
   const [metricLoading, setMetricLoading] = useState(false);
   const [snapshotStatus, setSnapshotStatus] = useState("");
   const { socket } = useSocket();
 
-  const fetchMetricHistory = async () => {
+  const fetchMetricHistory = useCallback(async () => {
+    if (!enabled) { setMetricHistory([]); return; }
     try {
       setMetricLoading(true);
       const response = await api.get("/metrics/history");
@@ -25,7 +26,7 @@ function useMetrics(currentStats = {}) {
     } finally {
       setMetricLoading(false);
     }
-  };
+  }, [enabled]);
 
   // 🛰️ INTERCEPT EVENT BROADCASTS TO AUTO-REFRESH CHARTS INSTANTLY
   useEffect(() => {
@@ -42,11 +43,11 @@ function useMetrics(currentStats = {}) {
       socket.off('metrics_updated', handleRefresh);
       socket.off('inventory_updated', handleRefresh);
     };
-  }, [socket]);
+  }, [socket, fetchMetricHistory]);
 
   useEffect(() => {
-    fetchMetricHistory();
-  }, []);
+    if (enabled) fetchMetricHistory();
+  }, [enabled, fetchMetricHistory]);
 
   return { metricHistory, metricLoading, snapshotStatus, refreshMetrics: fetchMetricHistory };
 }

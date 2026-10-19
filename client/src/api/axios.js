@@ -1,17 +1,11 @@
 // src/api/axios.js
 import axios from 'axios';
+import { API_BASE_URL } from './config';
 
 // 🚀 FIXED: Dynamic Environment Hostname Resolver 
 // Detects if you are accessing via a mobile device/hotspot network or your local laptop browser.
-const activeHostname = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-
-// Bulletproof fallback routing configuration
-const computedBaseURL = (activeHostname === 'localhost' || activeHostname === '127.0.0.1')
-  ? 'http://localhost:5000'
-  : `http://${activeHostname}:5000`; // Dynamically grabs your laptop's current network IP on your phone
-
 const api = axios.create({
-  baseURL: computedBaseURL,
+  baseURL: API_BASE_URL,
 });
 
 // Automatically inject the token into every request header

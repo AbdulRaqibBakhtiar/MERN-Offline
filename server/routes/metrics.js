@@ -3,10 +3,12 @@ const express = require('express');
 const router = express.Router();
 const MetricSnapshot = require('../models/MetricSnapshot');
 const Inventory = require('../models/Inventory');
+const User = require('../models/Users');
 const socketManager = require('../config/socket');
+const { protect, requireAdmin } = require('../middleware/auth');
 
 // 📸 CREATE NEW METRIC SNAPSHOT RECORD IN DATABASE
-router.post('/snapshot', async (req, res) => {
+router.post('/snapshot', protect, requireAdmin, async (req, res) => {
   try {
     const items = await Inventory.find();
     const totalItems = items.length;
@@ -26,7 +28,8 @@ router.post('/snapshot', async (req, res) => {
 
     // 📡 Broadcast live telemetry triggers to update client metrics grids instantly
     try {
-      socketManager.getIO().emit('metrics_updated', snapshot);
+      const administrators = await User.find({ role: 'admin' }).select('_id').lean();
+      administrators.forEach(admin => socketManager.getIO().to(`user:${admin._id}`).emit('metrics_updated', snapshot));
       socketManager.getIO().emit('inventory_updated');
     } catch (ioErr) {
       console.error("ℹ️ Socket emission postponed: ", ioErr.message);
@@ -39,7 +42,7 @@ router.post('/snapshot', async (req, res) => {
 });
 
 // 📡 FETCH SNAPSHOT HISTORICAL DATA STREAM (Sorted Chronologically)
-router.get('/history', async (req, res) => {
+router.get('/history', protect, requireAdmin, async (req, res) => {
   try {
     const data = await MetricSnapshot.find().sort({ date: 1 });
     res.json(data);

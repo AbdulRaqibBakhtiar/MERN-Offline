@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { createPortal } from 'react-dom';
 import { ImagePreview } from './ImagePreview';
 import { PremiumVideoPlayer } from './PremiumVideoPlayer';
+import { MediaViewer } from './MediaViewer';
 import { Play } from 'lucide-react';
 import { MessageMeta } from './MessageMeta';
 
@@ -26,6 +26,14 @@ export const MessageMediaPreview = ({
           e.stopPropagation();
 
           if (isVideo) {
+            setIsCinemaActive(true);
+          }
+        }}
+        role={isVideo ? 'button' : undefined}
+        tabIndex={isVideo ? 0 : undefined}
+        onKeyDown={e => {
+          if (isVideo && (e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault();
             setIsCinemaActive(true);
           }
         }}
@@ -222,15 +230,12 @@ export const MessageMediaPreview = ({
       ========================================================= */}
       {isVideo &&
         isCinemaActive &&
-        createPortal(
-          <PremiumVideoPlayer
-            src={attachmentUrl}
-            isPlaying={true}
-            onClose={() => setIsCinemaActive(false)}
-            isPreview={false}
-          />,
-          document.body
-        )}
+        <MediaViewer
+          isOpen
+          media={[{ url: attachmentUrl, type: 'video', title: msg?.message || 'Video message' }]}
+          onClose={() => setIsCinemaActive(false)}
+          title="Video message"
+        />}
     </>
   );
 };

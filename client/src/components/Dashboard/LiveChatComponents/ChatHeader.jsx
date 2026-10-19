@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../../../api/config';
 import React from 'react';
 import { Phone, Video, X, ArrowLeft, ChevronLeft, Shield, MessageSquare, Users } from 'lucide-react';
 
@@ -13,7 +14,7 @@ export const ChatHeader = ({ chatProps, resolveDrawerImgUrl }) => {
     if (imgField.startsWith('http://') || imgField.startsWith('https://') || imgField.startsWith('data:')) {
       return imgField;
     }
-    const backendHost = "http://localhost:5000";
+    const backendHost = `${API_BASE_URL}`;
     let cleanPath = imgField.replace(/\\/g, '/');
     if (!cleanPath.startsWith('public/') && !cleanPath.startsWith('/public/')) {
       if (cleanPath.startsWith('uploads/profiles/')) {
@@ -32,10 +33,21 @@ export const ChatHeader = ({ chatProps, resolveDrawerImgUrl }) => {
   const finalHeaderAvatarUrl = resolveHeaderImgUrl(headerAvatar);
   const normalizedRoomId = currentRoom?.id || currentRoom?._id;
   const isPersonalNotes = currentRoom && (currentRoom.type === 'personal' || String(normalizedRoomId) === String(currentUserId));
-  const showCallButtons = activeView !== 'hub' && currentRoom && !isPersonalNotes && callState === 'idle';
-
   // Check if the current direct message peer is online right now
   const isPeerOnline = currentRoom?.type === 'dm' && activeUsersList.some(u => String(u.userId) === String(currentRoom.peerId));
+  const conferencePeers = currentRoom?.type === 'group'
+    ? activeUsersList.filter(peer => String(peer.userId) !== String(currentUserId) && peer.userId)
+    : [];
+  const canStartCall = currentRoom?.type === 'dm' ? isPeerOnline : conferencePeers.length > 0;
+  const showCallButtons = activeView !== 'hub' && ['dm', 'group'].includes(currentRoom?.type) && !isPersonalNotes && callState === 'idle';
+  const startCall = type => initiateCallSession?.(type, {
+    roomId: currentRoom.id || currentRoom._id,
+    targetPeerId: currentRoom.type === 'dm' ? currentRoom.peerId : undefined,
+    targetName: currentRoom.type === 'dm' ? currentRoom.name : 'Conference call',
+    targetAvatar: currentRoom.avatar,
+    conference: currentRoom.type === 'group',
+    targets: conferencePeers.map(peer => ({ userId: peer.userId, name: peer.username, profileImage: peer.profileImage }))
+  });
 
   const headerStyles = `
     @keyframes greenDotBreathe {
@@ -128,10 +140,10 @@ export const ChatHeader = ({ chatProps, resolveDrawerImgUrl }) => {
 
         {showCallButtons && (
           <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-            <button onClick={() => initiateCallSession && initiateCallSession("voice", currentRoom.type === "dm" ? { roomId: currentRoom.id || currentRoom._id, targetPeerId: currentRoom.peerId } : { roomId: currentRoom.id || currentRoom._id })} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted, #94a3b8)', cursor: 'pointer', width: '30px', height: '32px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.color = '#22c55e'; e.currentTarget.style.background = 'rgba(34, 197, 94, 0.12)'; }} onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted, #94a3b8)'; e.currentTarget.style.background = 'transparent'; }} title="Voice Call Session">
+            <button disabled={!canStartCall} onClick={() => startCall('voice')} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted, #94a3b8)', cursor: canStartCall ? 'pointer' : 'not-allowed', opacity: canStartCall ? 1 : .42, width: '30px', height: '32px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { if (canStartCall) { e.currentTarget.style.color = '#22c55e'; e.currentTarget.style.background = 'rgba(34, 197, 94, 0.12)'; } }} onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted, #94a3b8)'; e.currentTarget.style.background = 'transparent'; }} title={canStartCall ? (currentRoom.type === 'group' ? 'Start group voice call (up to 4 people)' : 'Start voice call') : 'No other participants are active in this chat'}>
               <Phone size={14} fill="currentColor" />
             </button>
-            <button onClick={() => initiateCallSession && initiateCallSession("video", currentRoom.type === "dm" ? { roomId: currentRoom.id || currentRoom._id, targetPeerId: currentRoom.peerId } : { roomId: currentRoom.id || currentRoom._id })} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted, #94a3b8)', cursor: 'pointer', width: '30px', height: '32px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.color = '#06b6d4'; e.currentTarget.style.background = 'rgba(6,182,212,0.12)'; }} onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted, #94a3b8)'; e.currentTarget.style.background = 'transparent'; }} title="Video Call Session">
+            <button disabled={!canStartCall} onClick={() => startCall('video')} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted, #94a3b8)', cursor: canStartCall ? 'pointer' : 'not-allowed', opacity: canStartCall ? 1 : .42, width: '30px', height: '32px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { if (canStartCall) { e.currentTarget.style.color = '#06b6d4'; e.currentTarget.style.background = 'rgba(6,182,212,0.12)'; } }} onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted, #94a3b8)'; e.currentTarget.style.background = 'transparent'; }} title={canStartCall ? (currentRoom.type === 'group' ? 'Start group video call (up to 4 people)' : 'Start video call') : 'No other participants are active in this chat'}>
               <Video size={14} fill="currentColor" />
             </button>
           </div>

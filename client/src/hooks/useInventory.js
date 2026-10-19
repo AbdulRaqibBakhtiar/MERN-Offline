@@ -4,9 +4,11 @@
 import { useState, useEffect, useCallback } from 'react'; 
 import { fetchItems, updateItem, deleteItem, createItem } from '../services/inventoryServices'; 
 import { useAuth } from '../context/AuthContext'; 
+import { useSocket } from '../context/SocketContext';
 
 export const useInventory = () => { 
   const { token, logout } = useAuth(); 
+  const { socket } = useSocket() || {};
   
   // States mapping layouts 
   const [loading, setLoading] = useState(true); 
@@ -15,6 +17,7 @@ export const useInventory = () => {
   const [itemQuantity, setItemQuantity] = useState(0); 
   const [itemPrice, setItemPrice] = useState(0); 
   const [itemCategory, setItemCategory] = useState("tools"); 
+  const [itemDescription, setItemDescription] = useState("");
   const [itemList, setItemList] = useState([]); 
   const [isEditing, setIsEditing] = useState(null); 
   
@@ -66,12 +69,19 @@ export const useInventory = () => {
   useEffect(() => { 
     if (token) loadItems(); 
   }, [token, loadItems]);
+
+  useEffect(() => {
+    if (!socket || !token) return undefined;
+    const refreshInventory = () => loadItems();
+    socket.on('inventory_updated', refreshInventory);
+    return () => socket.off('inventory_updated', refreshInventory);
+  }, [socket, token, loadItems]);
   // ========================================== //
   // USE INVENTORY HOOK - PART 2 OF 2           //
   // ========================================== //
-  const addItem = async (imageFile = null) => { 
-    if (!itemName || !itemBrand || !itemQuantity || !itemPrice || !itemCategory) { 
-      return alert("Please fill in all fields!"); 
+  const addItem = async (imageFiles = []) => { 
+    if (!itemName.trim() || !itemBrand.trim() || !Number.isInteger(Number(itemQuantity)) || Number(itemQuantity) < 0 || !Number.isFinite(Number(itemPrice)) || Number(itemPrice) < 0 || !itemCategory) { 
+      throw new Error("Enter a product name, brand, valid stock quantity, and non-negative price.");
     } 
     try { 
       const formData = new FormData(); 
@@ -80,7 +90,9 @@ export const useInventory = () => {
       formData.append('quantity', Number(itemQuantity)); 
       formData.append('price', Number(itemPrice)); 
       formData.append('category', itemCategory); 
-      if (imageFile) formData.append('productImage', imageFile); 
+      formData.append('description', itemDescription);
+      const files = Array.isArray(imageFiles) ? imageFiles : imageFiles ? [imageFiles] : [];
+      files.forEach(file => formData.append('productMedia', file));
       
       await createItem(formData, token); 
       setItemName(""); 
@@ -88,9 +100,11 @@ export const useInventory = () => {
       setItemQuantity(0); 
       setItemPrice(0); 
       setItemCategory("tools"); 
+      setItemDescription("");
       loadItems(); 
     } catch (err) { 
-      console.error("Add Item Error:", err.message || err); 
+      console.error("Add Item Error:", err.message || err);
+      throw err;
     } 
   }; 
 
@@ -164,7 +178,7 @@ export const useInventory = () => {
 
   return { 
     loading, itemList, itemName, setItemName, itemBrand, setItemBrand, itemQuantity, setItemQuantity, 
-    itemPrice, setItemPrice, itemCategory, setItemCategory, isEditing, setIsEditing, editName, setEditName, 
+    itemPrice, setItemPrice, itemCategory, setItemCategory, itemDescription, setItemDescription, isEditing, setIsEditing, editName, setEditName, 
     editBrand, setEditBrand, editQuantity, setEditQuantity, editPrice, setEditPrice, editCategory, setEditCategory, 
     deleteTargetId, setDeleteTargetId, addItem, startEditing, handleSaveEdit, openDeleteModal, handleConfirmDelete, 
     loadItems, submitProductReview 

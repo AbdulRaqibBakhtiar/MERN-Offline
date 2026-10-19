@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import LoginPage from './LoginPage';
 import { useAuth } from '../context/AuthContext';
 
-const LoginContainer = () => {
-    const [isLoginMode, setIsLoginMode] = useState(true);
+const LoginContainer = ({ initialRegisterMode = false }) => {
+    const [isLoginMode, setIsLoginMode] = useState(!initialRegisterMode);
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");
@@ -29,7 +29,7 @@ const LoginContainer = () => {
         setAuthError("");
     };
 
-    const handleAuthSubmit = async (e) => {
+  const handleAuthSubmit = async (e) => {
   e.preventDefault();
   setAuthError("");
 
@@ -55,7 +55,7 @@ const LoginContainer = () => {
       return triggerToastNotice("Password must contain at least one capital letter (A-Z).", "error");
     }
     if (!/[0-9]/.test(password)) {
-      return triggerToastNotice("Password must contain at least one numeric digit (0-9).");
+      return triggerToastNotice("Password must contain at least one numeric digit (0-9).", "error");
     }
     if (!/[!@#$%^&*(),.?":{}|<>_]/.test(password)) {
       return triggerToastNotice("Password must contain at least one special character (e.g., !, @, #, $, %).", "error");
@@ -67,10 +67,9 @@ const LoginContainer = () => {
       await login(username, password);
       clearFormFields();
     } else {
-      // 🚀 FIXED: Removed the faulty nested try/catch fallback wrapper that was nesting the object data variables!
       await register(username, email, password, firstName, lastName, phoneNumber);
       
-      setSuccessModal({ isOpen: true, message: "Account created successfully! Welcome to StockMaster." });
+      setSuccessModal({ isOpen: true, message: "Account created successfully! Welcome to Bazzar." });
       clearFormFields();
     }
   } catch (err) {
@@ -98,7 +97,7 @@ const LoginContainer = () => {
 
             {/* 🚀 NEW: Big Beautiful Typographic Branding Text Layer */}
             <div className="premium-bg-watermark">
-                StockMaster
+                Bazzar
             </div>
 
             {/* SVG Background Element 1: Rotating Engine Gear Wheel (Bottom Left) */}

@@ -94,7 +94,6 @@ function SuccessModal({ isOpen, message, onClose }) {
             onMouseLeave={() => setHoveredButton(null)}
             style={{
               width: '100%',
-              backgroundColor: '#10b981',
               color: '#ffffff',
               border: 'none',
               borderRadius: '6px',
